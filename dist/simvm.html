@@ -1,0 +1,3226 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Simulador de Memoria Virtual 351</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
+  <meta name="description" content="Simulador de memoria virtual con TLB, tabla de páginas, swap y políticas de reemplazo LRU, FIFO y aleatoria.">
+  <style>
+/* ==========================================================
+   Variables de diseño — tema claro (mismo lenguaje visual que
+   el Simulador de Memoria Caché 351 del grupo).
+   Layout: encabezado degradado + filas de paneles blancos:
+   configurar | operar | mensajes, luego estructuras y resultados.
+========================================================== */
+:root {
+  color-scheme: light;
+
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #dbeafe;
+
+  --secondary: #64748b;
+  --secondary-dark: #475569;
+
+  --success: #16a34a;
+  --success-dark: #15803d;
+  --success-light: #dcfce7;
+
+  --danger: #dc2626;
+  --danger-dark: #b91c1c;
+  --danger-light: #fee2e2;
+
+  --warning: #f59e0b;
+  --warning-dark: #b45309;
+  --warning-light: #fef3c7;
+
+  --info: #0891b2;
+  --info-dark: #0e7490;
+  --info-light: #cffafe;
+
+  --purple: #7c3aed;
+  --purple-light: #ede9fe;
+
+  --background: #f1f5f9;
+  --surface: #ffffff;
+  --surface-secondary: #f8fafc;
+  --ink-strong: #0f172a;
+  --table-head: #1e293b;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --on-dark: #ffffff;
+  --on-dark-muted: #cbd5e1;
+
+  --border: #e2e8f0;
+  --border-dark: #cbd5e1;
+
+  /* Campos de la dirección: el mismo color en toda la interfaz */
+  --f-vpn: var(--warning-dark);
+  --f-vpn-bg: var(--warning-light);
+  --f-tag: var(--purple);
+  --f-tag-bg: var(--purple-light);
+  --f-idx: var(--primary-dark);
+  --f-idx-bg: var(--primary-light);
+  --f-off: var(--success-dark);
+  --f-off-bg: var(--success-light);
+  --f-ppn: var(--info-dark);
+  --f-ppn-bg: var(--info-light);
+  --f-swap: #a16207;
+  --f-swap-bg: #fef9c3;
+
+  /* Resaltado del paso actual */
+  --hl: #fef08a;
+  --hl-ring: #eab308;
+
+  --shadow-sm: 0 2px 6px rgb(15 23 42 / 0.05);
+  --shadow-md: 0 6px 18px rgb(15 23 42 / 0.09);
+  --shadow-lg: 0 12px 35px rgb(15 23 42 / 0.16);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 15px;
+
+  --font-body: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", "SFMono-Regular", Menlo, "Liberation Mono", monospace;
+
+  --gap: 16px;
+}
+
+/* ==========================================================
+   Base y distribución general
+========================================================== */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+h1, h2, h3, p { margin: 0; }
+h1, h2, h3 { text-wrap: balance; }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+::selection { background: #bfdbfe; color: #1e40af; }
+
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.mono, code { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--text-secondary); }
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+/* ---------- encabezado ---------- */
+
+.header {
+  color: var(--on-dark);
+  background: linear-gradient(120deg, #0f172a 0%, #1e3a8a 55%, #2563eb 100%);
+  box-shadow: var(--shadow-md);
+}
+
+.header__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  max-width: 1800px;
+  margin: 0 auto;
+  padding-block: 18px;
+  padding-left: max(28px, env(safe-area-inset-left, 0px));
+  padding-right: max(28px, env(safe-area-inset-right, 0px));
+}
+
+.header h1 { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; }
+.header__titles p { color: var(--on-dark-muted); font-size: 0.86rem; margin-top: 4px; }
+.header__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---------- filas de paneles ---------- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  max-width: 1800px;
+  margin: 0 auto;
+  padding-block: var(--gap) 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+.row {
+  display: grid;
+  gap: var(--gap);
+  align-items: stretch;
+}
+
+.row--top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }
+.row--three { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; }
+.row--storage { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; }
+
+@media (max-width: 1280px) {
+  .row--top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .panel--messages { grid-column: 1 / -1; }
+  .row--three { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #vm-view { grid-column: 1 / -1; }
+}
+
+@media (max-width: 860px) {
+  .row--top,
+  .row--three,
+  .row--storage { grid-template-columns: minmax(0, 1fr); }
+  .header__inner { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .header h1 { font-size: 1.35rem; }
+}
+
+.footer {
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--on-dark-muted);
+  background: var(--ink-strong);
+}
+
+/* ==========================================================
+   Componentes reutilizables
+========================================================== */
+
+/* ---------- paneles y tarjetas ---------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 14px 16px;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel__title { font-size: 1.12rem; font-weight: 700; color: var(--text-primary); }
+.panel__meta { color: var(--text-secondary); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.panel__head > :last-child.btn,
+.panel__head > .badge:last-child,
+.panel__head > .check:last-child { margin-left: auto; }
+
+.panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  min-width: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.card--soft { background: var(--surface-secondary); }
+.card--summary { border: 1px solid #bfdbfe; border-left: 4px solid var(--primary); background: #f8fbff; }
+
+.card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.card__title { font-size: 0.92rem; font-weight: 700; }
+.card--summary .card__title { color: var(--primary-dark); }
+.card__note { color: var(--text-secondary); font-size: 0.8rem; }
+
+.group-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  white-space: nowrap;
+}
+
+.badge--neutral { background: var(--border); color: var(--text-secondary); }
+.badge--ok { background: var(--success-light); color: var(--success-dark); }
+.badge--warn { background: var(--warning-light); color: var(--warning-dark); }
+
+.hint { color: var(--text-secondary); font-size: 0.8rem; }
+.empty { color: var(--text-muted); font-style: italic; text-align: center; padding: 22px 8px; }
+
+.callout {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--primary);
+  background: #eff6ff;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.callout--ok { border-left-color: var(--success); background: #f0fdf4; }
+
+/* ---------- campos ---------- */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field__label { font-size: 0.78rem; font-weight: 600; color: var(--text-primary); }
+.field__help { font-size: 0.72rem; color: var(--text-muted); }
+
+.input,
+.field select,
+.field input,
+.field textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.field input.mono,
+.field textarea { font-family: var(--font-mono); }
+.field textarea { resize: vertical; min-height: 70px; }
+
+.input:focus,
+.field select:focus,
+.field input:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.15);
+}
+
+.field input:disabled,
+.field select:disabled,
+.field textarea:disabled { background: var(--surface-secondary); color: var(--text-muted); }
+
+.input-action {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.input-action .field { flex: 1 1 auto; }
+
+/* ---------- interruptor (toggle) ---------- */
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+
+.toggle__track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--border-dark);
+  transition: background 0.2s;
+}
+
+.toggle__track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggle__track { background: var(--primary); }
+.toggle input:checked + .toggle__track::after { transform: translateX(16px); }
+.toggle input:focus-visible + .toggle__track { outline: 2px solid var(--primary); outline-offset: 2px; }
+.toggle input:disabled + .toggle__track { opacity: 0.5; }
+.toggle__text { display: flex; flex-direction: column; font-weight: 600; font-size: 0.86rem; }
+.toggle__text small { font-weight: 400; color: var(--text-secondary); font-size: 0.76rem; }
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.check input { accent-color: var(--primary); width: 15px; height: 15px; }
+
+/* ---------- botones ---------- */
+
+.button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  color: var(--on-dark);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+}
+
+.btn:hover:not(:disabled) { background: var(--secondary-dark); box-shadow: var(--shadow-sm); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; }
+
+.btn--primary { background: var(--primary); }
+.btn--primary:hover:not(:disabled) { background: var(--primary-dark); }
+.btn--success { background: var(--success); }
+.btn--success:hover:not(:disabled) { background: var(--success-dark); }
+.btn--warning { background: var(--warning); color: var(--ink-strong); }
+.btn--warning:hover:not(:disabled) { background: #fbbf24; }
+.btn--danger { background: var(--danger); }
+.btn--danger:hover:not(:disabled) { background: var(--danger-dark); }
+.btn--header { background: rgb(255 255 255 / 0.16); border-color: rgb(255 255 255 / 0.25); }
+.btn--header:hover:not(:disabled) { background: rgb(255 255 255 / 0.26); }
+
+.btn--outline {
+  background: var(--surface);
+  color: var(--primary-dark);
+  border-color: #93c5fd;
+}
+
+.btn--outline:hover:not(:disabled) { background: var(--primary-light); }
+
+.btn--light {
+  background: var(--border);
+  color: var(--text-secondary);
+  min-height: 30px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
+.btn--light:hover:not(:disabled) { background: var(--border-dark); }
+.btn--block { width: 100%; }
+.btn--lg { min-height: 44px; font-size: 0.95rem; }
+.btn--tiny { min-height: 24px; padding: 1px 9px; font-size: 0.74rem; background: var(--primary); }
+
+.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--f-vpn);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* ---------- tablas ---------- */
+
+.table-wrap {
+  overflow: auto;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.table-wrap--tall { max-height: 420px; }
+
+.grid-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-table th,
+.grid-table td {
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.grid-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--table-head);
+  color: var(--on-dark);
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-bottom: 0;
+}
+
+.grid-table tbody th { font-weight: 600; }
+.grid-table tbody tr:nth-child(even) > * { background: var(--surface-secondary); }
+.grid-table tbody tr:last-child > * { border-bottom: 0; }
+
+.grid-table tr.is-empty td,
+.grid-table tr.is-empty th { color: var(--text-muted); }
+
+.grid-table tr.is-soft > * { background: #fefce8; }
+.grid-table tbody tr.is-selected > * { background: var(--primary-light); }
+.grid-table tbody tr.is-focus > *,
+.grid-table td.is-focus {
+  background: var(--hl);
+  color: var(--text-primary);
+}
+
+.grid-table tr.is-focus > :first-child { box-shadow: inset 4px 0 0 var(--hl-ring); }
+
+.bit { font-family: var(--font-mono); }
+.bit--on { font-weight: 700; color: var(--text-primary); }
+.bit--off { color: var(--text-muted); }
+
+.bit-toggle {
+  min-width: 26px;
+  min-height: 22px;
+  border-radius: 4px;
+  border: 1px solid var(--border-dark);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.bit-toggle.is-on {
+  background: var(--success-light);
+  border-color: var(--success);
+  color: var(--success-dark);
+  font-weight: 700;
+}
+
+.bit-toggle:hover:not(:disabled) { border-color: var(--primary); }
+
+.field-tag { color: var(--f-tag); font-weight: 600; }
+.field-ppn { color: var(--f-ppn); font-weight: 600; }
+.field-swap { color: var(--f-swap); font-weight: 600; }
+.set-label { color: var(--f-idx); font-family: var(--font-mono); }
+.grid-table tr.set-start > * { border-top: 2px solid var(--border-dark); }
+.grid-table tbody tr.set-start:first-child > * { border-top: 0; }
+
+/* ---------- pestañas ---------- */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 16px;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  border: 0;
+  background: none;
+  padding: 13px 14px 11px;
+  border-bottom: 3px solid transparent;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.tab[aria-selected="true"] { color: var(--primary-dark); border-bottom-color: var(--primary); }
+.tab .badge { margin-left: 6px; }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+/* ---------- aviso flotante ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 11px 18px;
+  border-radius: var(--radius-md);
+  background: var(--ink-strong);
+  color: var(--on-dark);
+  box-shadow: var(--shadow-lg);
+  font-weight: 600;
+}
+
+.toast[data-tone="bad"] { background: var(--danger); }
+.toast[data-tone="ok"] { background: var(--success-dark); }
+
+/* ---------- diálogo de ayuda ---------- */
+
+.help {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+}
+
+.help::backdrop { background: rgb(15 23 42 / 0.55); }
+.help__body { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 20px; overflow: auto; }
+.help__body h3 { font-size: 0.95rem; color: var(--primary-dark); }
+.help__body ol, .help__body ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.help__body li { max-width: 72ch; }
+
+/* ==========================================================
+   Estilos propios de cada vista
+========================================================== */
+
+/* ---------- resumen del sistema ---------- */
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.summary-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: center;
+  min-width: 0;
+}
+
+.summary-tile__label { font-size: 0.72rem; color: var(--text-secondary); }
+.summary-tile__value { font-family: var(--font-mono); font-size: 1.05rem; font-weight: 700; color: var(--primary-dark); }
+.summary-tile__formula { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+
+/* ---------- asignación ---------- */
+
+.alloc-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.alloc-summary__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.alloc-summary__value { font-family: var(--font-mono); font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+.alloc-summary__item.is-mm { background: var(--f-ppn-bg); border-color: #a5f3fc; }
+.alloc-summary__item.is-swap { background: var(--f-swap-bg); border-color: #fde68a; }
+
+.alloc-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.alloc-row .field { width: 6.5em; flex: 0 0 auto; }
+.alloc-row .btn { flex: 1 1 auto; }
+
+/* ---------- descomposición de la dirección ---------- */
+
+.binary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border-radius: var(--radius-md);
+  background: var(--ink-strong);
+  color: var(--on-dark-muted);
+  text-align: center;
+}
+
+.binary__caption { font-size: 0.74rem; }
+.binary__bits { max-width: 100%; overflow-x: auto; padding-bottom: 2px; }
+
+.bitrow {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(18px, 1fr));
+  gap: 2px 3px;
+  min-width: calc(var(--cols) * 21px);
+}
+
+.bitbox {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.bitbox--tag { color: #c4b5fd; }
+.bitbox--idx { color: #93c5fd; }
+.bitbox--off { color: #86efac; }
+.bitbox--ppn { color: #67e8f9; }
+
+.bitlabel {
+  padding-top: 2px;
+  border-top: 2px solid currentColor;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bitlabel--vpn { color: #fcd34d; }
+.bitlabel--tag { color: #c4b5fd; }
+.bitlabel--idx { color: #93c5fd; }
+.bitlabel--off { color: #86efac; }
+.bitlabel--ppn { color: #67e8f9; }
+.bitlabel--blank { border-top-color: transparent; }
+
+.binary__empty { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; color: #67e8f9; letter-spacing: 0.04em; }
+
+.field-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
+  gap: 8px;
+}
+
+.field-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 7px 4px;
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.field-card__name { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.field-card__value { font-family: var(--font-mono); font-size: 1.05rem; font-weight: 700; }
+.field-card__bits { font-size: 0.68rem; color: var(--text-secondary); }
+
+.field-card--vpn { background: var(--f-vpn-bg); color: var(--f-vpn); }
+.field-card--tag { background: var(--f-tag-bg); color: var(--f-tag); }
+.field-card--idx { background: var(--f-idx-bg); color: var(--f-idx); }
+.field-card--off { background: var(--f-off-bg); color: var(--f-off); }
+.field-card--ppn { background: var(--f-ppn-bg); color: var(--f-ppn); }
+.field-card.is-pending .field-card__value { color: var(--text-muted); }
+
+.stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: #fefce8;
+  border: 1px solid var(--hl-ring);
+}
+
+.stepper__label { flex: 1 1 100%; font-weight: 600; font-size: 0.84rem; }
+.stepper .btn { flex: 1 1 auto; }
+
+/* ---------- mensajes de simulación ---------- */
+
+.panel--messages .panel__body { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+
+@media (max-width: 1280px) {
+  .panel--messages .panel__body { flex: 0 0 auto; max-height: 480px; }
+}
+
+.messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--info);
+  border-radius: var(--radius-sm);
+  background: #ecfeff;
+  font-size: 0.82rem;
+}
+
+.message--ok { border-left-color: var(--success); background: #f0fdf4; }
+.message--warn { border-left-color: var(--warning); background: #fffbeb; }
+.message--bad { border-left-color: var(--danger); background: #fef2f2; }
+.message.is-live { box-shadow: 0 0 0 2px var(--hl-ring); }
+
+.message__head { display: flex; justify-content: space-between; gap: 8px; }
+.message__title { font-weight: 700; }
+.message__time { color: var(--text-muted); font-size: 0.72rem; font-family: var(--font-mono); }
+.message__detail { color: var(--text-secondary); }
+
+.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; display: flex; flex-direction: column; gap: 5px; }
+
+.step {
+  counter-increment: step;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px 6px 34px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.step::before {
+  content: counter(step);
+  position: absolute;
+  left: 8px;
+  top: 7px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--info);
+  color: var(--on-dark);
+}
+
+.step strong { font-size: 0.82rem; }
+.step span { color: var(--text-secondary); }
+.step--ok::before { background: var(--success); }
+.step--warn::before { background: var(--warning); color: var(--ink-strong); }
+.step--bad::before { background: var(--danger); }
+.step.is-current { border-color: var(--hl-ring); background: #fefce8; }
+
+/* ---------- estadísticas ---------- */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  text-align: center;
+}
+
+.stat__label { font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); }
+.stat__value { font-size: 1.6rem; font-weight: 800; line-height: 1.2; color: var(--primary-dark); font-variant-numeric: tabular-nums; }
+.stat__note { font-size: 0.7rem; color: var(--text-secondary); }
+.stat--ok { background: #f0fdf4; border-color: #86efac; }
+.stat--ok .stat__value { color: var(--success); }
+.stat--bad { background: #fef2f2; border-color: #fca5a5; }
+.stat--bad .stat__value { color: var(--danger); }
+.stat--warn { background: #fffbeb; border-color: #fcd34d; }
+.stat--warn .stat__value { color: var(--warning-dark); }
+
+/* ---------- memorias ---------- */
+
+.bytes-table td.byte { font-family: var(--font-mono); padding: 5px 5px; }
+.bytes-table thead .byte-head { padding: 6px 5px; }
+.grid-table tr.is-empty td.byte { opacity: 0.4; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.76rem; color: var(--text-secondary); }
+.legend__item { display: inline-flex; align-items: center; gap: 6px; }
+.legend__item::before { content: ""; width: 12px; height: 12px; border-radius: 3px; }
+.legend__item--free::before { border: 1px dashed var(--border-dark); background: var(--surface); }
+.legend__item--mm::before { background: var(--f-ppn-bg); border: 1px solid var(--info); }
+.legend__item--swap::before { background: var(--f-swap-bg); border: 1px solid #eab308; }
+
+.page-map-wrap { max-height: 300px; overflow-y: auto; padding: 2px; }
+
+.page-map {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: 5px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 4px 7px;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.tile__vpn { font-size: 0.8rem; font-weight: 700; }
+.tile__where { font-size: 0.66rem; color: var(--text-secondary); white-space: nowrap; }
+.tile--free { border-style: dashed; border-color: var(--border-dark); color: var(--text-muted); }
+.tile--free:hover:not(:disabled) { border-color: var(--primary); color: var(--primary-dark); box-shadow: var(--shadow-sm); }
+.tile--mm { background: var(--f-ppn-bg); border-color: #67e8f9; color: var(--info-dark); }
+.tile--swap { background: var(--f-swap-bg); border-color: #fde047; color: var(--f-swap); }
+.tile.is-selected { outline: 2px solid var(--primary); outline-offset: 1px; }
+.tile.is-focus { background: var(--hl); border-color: var(--hl-ring); color: var(--text-primary); }
+
+.page-detail { display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- historial y comparación ---------- */
+
+.history-table tr.is-fault > * { color: var(--danger-dark); }
+
+.compare-table thead th.group-head { background: var(--primary-dark); }
+.compare-table td.num { font-weight: 700; }
+.compare-table td.is-warn { color: var(--warning-dark); }
+.compare-table td.is-bad { color: var(--danger-dark); }
+
+.compare-table tfoot th,
+.compare-table tfoot td {
+  background: var(--primary-light);
+  border-top: 2px solid #93c5fd;
+  font-weight: 700;
+}
+
+.compare-table td.total { font-size: 1.05rem; }
+.compare-table td.is-best { color: var(--success-dark); }
+
+.policy-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+
+</style>
+</head>
+<body>
+  <header class="header">
+    <div class="header__inner">
+      <div class="header__titles">
+        <h1>Simulador de Memoria Virtual 351</h1>
+        <p>Sistemas Operacionales | Universidad Industrial de Santander · Práctica 3-2</p>
+      </div>
+      <div class="header__actions">
+        <button class="btn btn--header" type="button" id="btn-help">? Ayuda</button>
+        <button class="btn btn--danger" type="button" id="btn-header-reset">↻ Reiniciar</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- Fila 1: configurar · operar · leer lo que pasó -->
+    <div class="row row--top">
+      <section class="panel" id="config-panel" aria-label="Parámetros del sistema"></section>
+      <section class="panel" id="access-panel" aria-label="Acceso manual a memoria"></section>
+      <section class="panel panel--messages" id="messages-panel" aria-label="Mensajes de simulación"></section>
+    </div>
+
+    <!-- Fila 2: estructuras de traducción -->
+    <div class="row row--three">
+      <section class="panel" id="tlb-view"></section>
+      <section class="panel" id="pt-view"></section>
+      <section class="panel" id="vm-view"></section>
+    </div>
+
+    <!-- Fila 3: almacenamiento -->
+    <div class="row row--storage">
+      <section class="panel" id="pm-view"></section>
+      <section class="panel" id="swap-view"></section>
+    </div>
+
+    <!-- Fila 4: resultados -->
+    <section class="panel" id="stats-panel" aria-label="Estadísticas y rendimiento"></section>
+    <section class="panel" id="tools-panel" aria-label="Historial y comparación"></section>
+  </main>
+
+  <footer class="footer">Simulador de Memoria Virtual 351 | Sistemas Operacionales | Universidad Industrial de Santander</footer>
+
+  <dialog class="help" id="help-dialog" aria-labelledby="help-title"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script>
+(() => {
+'use strict';
+const __factories = {};
+const __cache = {};
+function __define(id, factory) { __factories[id] = factory; }
+function __require(id) {
+  if (!(id in __cache)) __cache[id] = __factories[id](__require);
+  return __cache[id];
+}
+__define("js/main.js", function (__require) {
+/**
+ * Punto de entrada: crea la sesión, monta las vistas y las conecta.
+ * Flujo de datos en una sola dirección:
+ *   vista → acción en SimulationSession → evento "change" → render() de todas las vistas.
+ */
+const { SimulationSession } = __require("js/app/session.js");
+const { Toast } = __require("js/ui/toast.js");
+const { ConfigPanel } = __require("js/ui/config-panel.js");
+const { AccessPanel } = __require("js/ui/access-panel.js");
+const { MessagesPanel } = __require("js/ui/messages-panel.js");
+const { StatsPanel } = __require("js/ui/stats-panel.js");
+const { TlbView } = __require("js/ui/tlb-view.js");
+const { PageTableView } = __require("js/ui/page-table-view.js");
+const { PhysicalMemoryView, VirtualMemoryView, SwapView } = __require("js/ui/memory-views.js");
+const { ToolsPanel } = __require("js/ui/tools-panel.js");
+const { HelpDialog } = __require("js/ui/help-dialog.js");
+const byId = (id) => document.getElementById(id);
+
+const session = new SimulationSession();
+const toast = new Toast(byId('toast'));
+
+/** Envuelve un manejador para mostrar los errores al usuario en lugar de perderlos en la consola. */
+const guard = (fn) => (...args) => {
+  try {
+    const out = fn(...args);
+    if (out instanceof Promise) out.catch((err) => toast.show(err.message, 'bad'));
+    return out;
+  } catch (err) {
+    toast.show(err.message, 'bad');
+    if (!(err instanceof RangeError) && err.name !== 'ConfigError') console.error(err);
+    return undefined;
+  }
+};
+
+const ctx = { session, guard, toast };
+
+const views = [
+  new ConfigPanel(byId('config-panel'), ctx),
+  new AccessPanel(byId('access-panel'), ctx),
+  new MessagesPanel(byId('messages-panel'), ctx),
+  new TlbView(byId('tlb-view'), ctx),
+  new PageTableView(byId('pt-view'), ctx),
+  new VirtualMemoryView(byId('vm-view'), ctx),
+  new PhysicalMemoryView(byId('pm-view'), ctx),
+  new SwapView(byId('swap-view'), ctx),
+  new StatsPanel(byId('stats-panel'), ctx),
+  new ToolsPanel(byId('tools-panel'), ctx),
+  new HelpDialog(byId('help-dialog'), byId('btn-help')),
+];
+
+views.forEach((v) => v.mount());
+const renderAll = () => views.forEach((v) => v.render());
+
+byId('btn-header-reset').addEventListener('click', guard(() => session.reset()));
+session.addEventListener('change', renderAll);
+session.addEventListener('notice', (e) => toast.show(e.detail.text, e.detail.tone));
+
+renderAll();
+
+return {  };
+});
+
+__define("js/app/session.js", function (__require) {
+/**
+ * Sesión de simulación: capa de aplicación entre el modelo (core) y las vistas (ui).
+ * Mantiene el sistema actual, el historial, el acceso en curso (modo paso a paso)
+ * y los elementos resaltados. Notifica cambios con eventos:
+ *   - "change": el estado cambió, las vistas deben redibujarse.
+ *   - "notice": mensaje breve para el usuario ({ text, tone }).
+ * No toca el DOM.
+ */
+const { buildGeometry, DEFAULT_CONFIG } = __require("js/core/config.js");
+const { VirtualMemorySystem } = __require("js/core/mmu.js");
+const { comparePolicies } = __require("js/core/analysis.js");
+const { createFormatter } = __require("js/core/format.js");
+class SimulationSession extends EventTarget {
+  #system = null;
+  #pending = null;
+  #messageId = 0;
+
+  constructor() {
+    super();
+    this.config = { ...DEFAULT_CONFIG };
+    this.options = { pagePolicy: 'LRU', tlbPolicy: 'LRU', protection: 'random', seed: 351 };
+    this.explain = true;
+    this.messages = [];
+    this.build(this.config);
+  }
+
+  /* ---------- lectura ---------- */
+
+  get system() { return this.#system; }
+  get geometry() { return this.#system.geometry; }
+  get format() { return createFormatter(this.#system.geometry); }
+  get busy() { return this.#pending !== null; }
+  get pendingAccess() {
+    return this.#pending ? { va: this.#pending.va, type: this.#pending.type } : null;
+  }
+
+  /* ---------- configuración ---------- */
+
+  build(config = this.config) {
+    this.#ensureIdle();
+    const g = buildGeometry(config);
+    this.config = { vaBits: g.vaBits, pageSize: g.pageSize, tlbSize: g.tlbSize, tlbWays: g.tlbWays, pmSize: g.pmSize };
+    this.#system = new VirtualMemorySystem(g, this.options);
+    this.history = [];
+    this.steps = [];
+    this.focus = new Set();
+    this.lastResult = null;
+    this.selectedVpn = null;
+    this.comparison = null;
+    this.messages = [];
+    this.#log('info', 'Sistema generado',
+      `Memoria virtual de ${g.vmSize} B (${g.pages} páginas de ${g.pageSize} B), memoria principal de ${g.pmSize} B ` +
+      `(${g.frames} frames) y TLB de ${g.tlbSize} entradas en ${g.tlbSets} conjunto(s) de ${g.tlbWays} vía(s). ` +
+      'Asigna páginas para empezar a hacer accesos.');
+    this.#changed();
+  }
+
+  reset() {
+    this.build(this.config);
+    this.#notify('Sistema reiniciado con la misma configuración.');
+  }
+
+  clearMessages() {
+    this.messages = this.messages.filter((m) => m.steps === this.steps && this.#pending);
+    this.#changed();
+  }
+
+  setOption(name, value) {
+    this.#ensureIdle();
+    if (name === 'pagePolicy') this.#system.setPagePolicy(value);
+    else if (name === 'tlbPolicy') this.#system.setTlbPolicy(value);
+    else if (name === 'protection') this.#system.setProtectionMode(value);
+    else if (name === 'seed') {
+      if (!Number.isInteger(value) || value < 0) throw new RangeError('La semilla debe ser un entero positivo.');
+    } else throw new RangeError(`Opción desconocida: ${name}`);
+    this.options = { ...this.options, [name]: value };
+    this.#changed();
+  }
+
+  setExplain(on) {
+    this.explain = Boolean(on);
+    this.#changed();
+  }
+
+  /* ---------- asignación y permisos ---------- */
+
+  allocate(vpn) {
+    this.#ensureIdle();
+    const fx = this.format;
+    const r = this.#system.allocate(vpn);
+    this.selectedVpn = vpn;
+    this.focus = new Set([`pt:${vpn}`, `vpage:${vpn}`, r.location === 'frame' ? `frame:${r.ppn}` : `swap:${r.ssn}`]);
+    this.#notify(r.location === 'frame'
+      ? `Página ${fx.vpn(vpn)} asignada al frame PPN ${fx.ppn(r.ppn)}.`
+      : `Memoria principal llena: la página ${fx.vpn(vpn)} quedó en swap (SSN ${fx.ssn(r.ssn)}).`, 'ok');
+    this.#changed();
+  }
+
+  allocateRandom(count) {
+    this.#ensureIdle();
+    const results = this.#system.allocateRandom(count);
+    if (results.length === 0) throw new Error('No quedan páginas sin asignar.');
+    this.focus = new Set(results.map((r) => `vpage:${r.vpn}`));
+    const inSwap = results.filter((r) => r.location === 'swap').length;
+    this.#notify(`${results.length} páginas asignadas en orden aleatorio${inSwap ? ` (${inSwap} quedaron en swap)` : ''}.`, 'ok');
+    this.#changed();
+  }
+
+  togglePermission(vpn, bit) {
+    this.#ensureIdle();
+    const pte = this.#system.state.pageTable[vpn];
+    this.#system.setPermission(vpn, bit, !pte[bit]);
+    this.focus = new Set([`pt:${vpn}`]);
+    this.#changed();
+  }
+
+  selectPage(vpn) {
+    this.selectedVpn = vpn;
+    this.#changed();
+  }
+
+  /* ---------- accesos ---------- */
+
+  startAccess(va, type = 'read', value = 0) {
+    this.#ensureIdle();
+    const fx = this.format;
+    this.steps = [];
+    this.lastResult = null;
+    this.focus = new Set();
+    this.#pending = { it: this.#system.access(va, { type, value }), va, type };
+    this.#log('info', `${type === 'read' ? 'Lectura' : 'Escritura'} en VA ${va} (${fx.va(va)})`, '', this.steps);
+    if (this.explain) this.nextStep();
+    else this.completeAccess();
+  }
+
+  nextStep() {
+    if (!this.#pending) return;
+    this.#advance();
+    this.#changed();
+  }
+
+  completeAccess() {
+    while (this.#pending) this.#advance();
+    this.#changed();
+  }
+
+  /** Ejecuta varias lecturas seguidas sobre el sistema real (sin paso a paso). */
+  runSequence(addresses, type = 'read') {
+    this.#ensureIdle();
+    addresses.forEach((va) => this.#assertAddress(va));
+    let last = null;
+    for (const va of addresses) {
+      last = this.#system.execute(va, { type });
+      this.#record(last);
+    }
+    this.lastResult = last;
+    this.steps = [];
+    this.focus = new Set();
+    const added = this.history.slice(-addresses.length);
+    const count = (pred) => added.filter(pred).length;
+    this.#log('ok', `Secuencia de ${addresses.length} lecturas`,
+      `Aciertos TLB: ${count((e) => e.tlb === 'hit')} · fallos de página: ${count((e) => e.pt === 'fault')} · ` +
+      `reemplazos: ${count((e) => e.replaced)} · fallos de segmento: ${count((e) => e.outcome === 'segfault')}. ` +
+      'El detalle de cada acceso está en el historial.');
+    this.#toast(`Secuencia de ${addresses.length} lecturas ejecutada.`, 'ok');
+    this.#changed();
+  }
+
+  /** Compara políticas desde el estado actual sin modificarlo. */
+  compare(addresses, policies, type = 'read') {
+    this.#ensureIdle();
+    if (policies.length === 0) throw new Error('Selecciona al menos una política.');
+    addresses.forEach((va) => this.#assertAddress(va));
+    const data = comparePolicies(this.#system, addresses, policies, type);
+    this.comparison = { id: Date.now(), data };
+    const totals = data.runs.map((r) => `${r.policy}: ${r.totals.replacements}`).join(' · ');
+    this.#log('info', 'Comparación de políticas', `${addresses.length} lecturas desde el estado actual. Reemplazos → ${totals}.`);
+    this.#changed();
+    return data;
+  }
+
+  clearHistory() {
+    this.history = [];
+    this.#changed();
+  }
+
+  /* ---------- internos ---------- */
+
+  #advance() {
+    const pending = this.#pending;
+    let r;
+    try {
+      r = pending.it.next();
+    } catch (err) {
+      this.#pending = null;
+      this.#changed();
+      throw err;
+    }
+    if (r.done) {
+      this.#finish(r.value);
+      return;
+    }
+    this.steps.push(r.value);
+    this.focus = new Set(r.value.focus);
+    if (r.value.final) this.#finish(pending.it.next().value);
+  }
+
+  #finish(result) {
+    this.#pending = null;
+    const entry = this.messages.find((m) => m.steps === this.steps);
+    if (entry) entry.tone = this.steps.at(-1)?.tone ?? 'info';
+    this.lastResult = result;
+    this.selectedVpn = result.vpn;
+    this.#record(result);
+  }
+
+  #record(result) {
+    this.history.push({ n: this.history.length + 1, ...result });
+  }
+
+  #assertAddress(va) {
+    const { vmSize } = this.geometry;
+    if (!Number.isInteger(va) || va < 0 || va >= vmSize) {
+      throw new RangeError(`Dirección fuera de rango: ${va}. Debe estar entre 0 y ${vmSize - 1}.`);
+    }
+  }
+
+  #ensureIdle() {
+    if (this.#pending) throw new Error('Termina el acceso en curso (Siguiente paso o Completar) antes de continuar.');
+  }
+
+  #changed() {
+    this.dispatchEvent(new Event('change'));
+  }
+
+  #log(tone, title, detail, steps = []) {
+    this.messages.unshift({ id: ++this.#messageId, tone, title, detail, steps, at: new Date() });
+    if (this.messages.length > 80) this.messages.length = 80;
+  }
+
+  #notify(text, tone = 'info') {
+    this.#log(tone === 'bad' ? 'bad' : 'info', text, '');
+    this.#toast(text, tone);
+  }
+
+  #toast(text, tone = 'info') {
+    this.dispatchEvent(new CustomEvent('notice', { detail: { text, tone } }));
+  }
+}
+
+return { SimulationSession };
+});
+
+__define("js/core/config.js", function (__require) {
+/**
+ * Configuración del sistema de memoria y geometría derivada.
+ * buildGeometry() es la única fuente de verdad para tamaños y anchos de campo.
+ */
+const { isPowerOfTwo, log2Int, mask } = __require("js/core/bits.js");
+const PARAMETER_OPTIONS = Object.freeze({
+  vaBits: Object.freeze([10, 12, 16]),
+  pageSize: Object.freeze([16, 32]),
+  tlbSize: Object.freeze([4, 8, 16, 32]),
+  tlbWays: Object.freeze([1, 2, 4]),
+  pmSize: Object.freeze([128, 256, 512]),
+});
+
+const DEFAULT_CONFIG = Object.freeze({
+  vaBits: 10,
+  pageSize: 16,
+  tlbSize: 4,
+  tlbWays: 2,
+  pmSize: 256,
+});
+
+class ConfigError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
+function buildGeometry(config = {}) {
+  const { vaBits, pageSize, tlbSize, tlbWays, pmSize } = { ...DEFAULT_CONFIG, ...config };
+
+  if (!Number.isInteger(vaBits) || vaBits < 4 || vaBits > 20) {
+    throw new ConfigError('El bus de direcciones virtuales debe tener entre 4 y 20 bits.');
+  }
+  const powers = { 'Tamaño de página': pageSize, 'Tamaño de la TLB': tlbSize, 'Asociatividad': tlbWays, 'Memoria principal': pmSize };
+  for (const [name, value] of Object.entries(powers)) {
+    if (!isPowerOfTwo(value)) throw new ConfigError(`${name} debe ser potencia de 2 (recibido ${value}).`);
+  }
+
+  const vmSize = 2 ** vaBits;
+  if (pageSize > pmSize) throw new ConfigError('La página no puede ser más grande que la memoria principal.');
+  if (pmSize > vmSize) throw new ConfigError('La memoria principal no puede superar a la memoria virtual.');
+  if (tlbWays > tlbSize) throw new ConfigError('La TLB no puede tener más vías que entradas.');
+
+  const offsetBits = log2Int(pageSize);
+  const vpnBits = vaBits - offsetBits;
+  const pages = 2 ** vpnBits;
+  const frames = pmSize / pageSize;
+  const tlbSets = tlbSize / tlbWays;
+  const indexBits = log2Int(tlbSets);
+  if (indexBits > vpnBits) throw new ConfigError('La TLB tiene más conjuntos que páginas virtuales.');
+
+  return Object.freeze({
+    vaBits, pageSize, tlbSize, tlbWays, pmSize,
+    vmSize,
+    offsetBits,
+    vpnBits,
+    pages,
+    pageTableEntries: pages,
+    frames,
+    ppnBits: log2Int(frames),
+    paBits: log2Int(pmSize),
+    tlbSets,
+    indexBits,
+    tagBits: vpnBits - indexBits,
+    swapSectors: pages,
+  });
+}
+
+/** Divide una dirección virtual en VPN/offset y la VPN en tag/índice de TLB. */
+function decomposeAddress(g, va) {
+  const vpn = Math.floor(va / g.pageSize);
+  const offset = va & mask(g.offsetBits);
+  const index = vpn & mask(g.indexBits);
+  const tag = Math.floor(vpn / g.tlbSets);
+  return { vpn, offset, index, tag };
+}
+
+function physicalAddress(g, ppn, offset) {
+  return ppn * g.pageSize + offset;
+}
+
+function virtualAddressOf(g, vpn, offset = 0) {
+  return vpn * g.pageSize + offset;
+}
+
+return { PARAMETER_OPTIONS, DEFAULT_CONFIG, ConfigError, buildGeometry, decomposeAddress, physicalAddress, virtualAddressOf };
+});
+
+__define("js/core/bits.js", function (__require) {
+/**
+ * Utilidades puras para trabajar con bits y formatos numéricos.
+ * No dependen del DOM, por lo que se pueden probar en Node.
+ */
+
+function isPowerOfTwo(n) {
+  return Number.isInteger(n) && n > 0 && (n & (n - 1)) === 0;
+}
+
+function log2Int(n) {
+  if (!isPowerOfTwo(n)) throw new RangeError(`${n} no es potencia de 2`);
+  return Math.log2(n);
+}
+
+/** Máscara con los `bits` menos significativos en 1. */
+function mask(bits) {
+  return bits <= 0 ? 0 : (2 ** bits) - 1;
+}
+
+/** Número de dígitos hexadecimales necesarios para representar `bits` bits. */
+function hexDigitsFor(bits) {
+  return Math.max(1, Math.ceil(bits / 4));
+}
+
+/** Formatea un entero como 0x.. con relleno según el ancho en bits. */
+function toHex(value, bits = 0) {
+  if (value === null || value === undefined) return '—';
+  return '0x' + value.toString(16).toUpperCase().padStart(hexDigitsFor(bits), '0');
+}
+
+function toBinary(value, bits) {
+  return bits <= 0 ? '' : value.toString(2).padStart(bits, '0');
+}
+
+/** Interpreta "80", "0x50" o "0X50". Devuelve NaN si el texto no es válido. */
+function parseNumber(text) {
+  const s = String(text ?? '').trim().toLowerCase();
+  if (/^0x[0-9a-f]+$/.test(s)) return parseInt(s.slice(2), 16);
+  if (/^[0-9]+$/.test(s)) return parseInt(s, 10);
+  return NaN;
+}
+
+/** Interpreta un byte escrito en hexadecimal ("AB", "0xab"). */
+function parseHexByte(text) {
+  const s = String(text ?? '').trim().toLowerCase().replace(/^0x/, '');
+  if (!/^[0-9a-f]{1,2}$/.test(s)) return NaN;
+  return parseInt(s, 16);
+}
+
+/** Convierte una lista libre ("80, 124 0x1E0\n5") en números. */
+function parseNumberList(text) {
+  return String(text ?? '')
+    .split(/[\s,;]+/)
+    .filter(Boolean)
+    .map((token) => ({ token, value: parseNumber(token) }));
+}
+
+return { isPowerOfTwo, log2Int, mask, hexDigitsFor, toHex, toBinary, parseNumber, parseHexByte, parseNumberList };
+});
+
+__define("js/core/mmu.js", function (__require) {
+/**
+ * Modelo del sistema de memoria virtual: TLB asociativa por conjuntos,
+ * tabla de páginas, memoria principal (frames) y espacio de swap.
+ *
+ * access() es un generador: cada `yield` entrega un paso explicado del
+ * proceso de traducción. La interfaz lo usa para el modo paso a paso
+ * (Explain/Next) y execute() lo consume de una vez para el modo rápido.
+ */
+const { mask } = __require("js/core/bits.js");
+const { decomposeAddress, physicalAddress } = __require("js/core/config.js");
+const { createFormatter } = __require("js/core/format.js");
+const { getPolicy } = __require("js/core/policies.js");
+const { SeededRandom } = __require("js/core/rng.js");
+const PROTECTION_MODES = Object.freeze({
+  random: Object.freeze({
+    id: 'random',
+    label: 'Aleatoria (como CS351)',
+    make: (rng) => ({ r: true, w: rng.next() < 0.5, e: rng.next() < 0.5 }),
+  }),
+  readWrite: Object.freeze({
+    id: 'readWrite',
+    label: 'Lectura y escritura',
+    make: () => ({ r: true, w: true, e: false }),
+  }),
+  readOnly: Object.freeze({
+    id: 'readOnly',
+    label: 'Solo lectura',
+    make: () => ({ r: true, w: false, e: false }),
+  }),
+});
+
+const PERMISSION_BITS = Object.freeze(['r', 'w', 'e']);
+
+function emptyStats() {
+  return {
+    reads: 0, writes: 0,
+    tlbHits: 0, tlbMisses: 0,
+    ptHits: 0, pageFaults: 0,
+    replacements: 0, segFaults: 0, protectionFaults: 0,
+  };
+}
+
+function emptyTlbEntry() {
+  return { valid: false, dirty: false, r: false, w: false, e: false, tag: null, ppn: null, vpn: null, loadedAt: 0, lastUsed: 0 };
+}
+
+function createState(g) {
+  return {
+    clock: 0,
+    pageTable: Array.from({ length: g.pages }, (_, vpn) => ({
+      vpn, allocated: false, valid: false, dirty: false, r: false, w: false, e: false, ppn: null, ssn: null,
+    })),
+    tlb: Array.from({ length: g.tlbSets }, () => Array.from({ length: g.tlbWays }, emptyTlbEntry)),
+    frames: Array(g.frames).fill(null),
+    memory: new Uint8Array(g.pmSize),
+    swap: Array(g.swapSectors).fill(null),
+    stats: emptyStats(),
+  };
+}
+
+function step(tone, title, detail, focus = [], final = false) {
+  return { tone, title, detail, focus, final };
+}
+
+function finalStep(tone, title, detail, focus = []) {
+  return step(tone, title, detail, focus, true);
+}
+
+class VirtualMemorySystem {
+  #pagePolicy;
+  #tlbPolicy;
+  #protection;
+  #fmt;
+
+  constructor(geometry, options = {}) {
+    const { pagePolicy = 'LRU', tlbPolicy = 'LRU', protection = 'random', seed = 351 } = options;
+    this.geometry = geometry;
+    this.seed = seed;
+    this.rng = new SeededRandom(seed);
+    this.state = createState(geometry);
+    this.#fmt = createFormatter(geometry);
+    this.setPagePolicy(pagePolicy);
+    this.setTlbPolicy(tlbPolicy);
+    this.setProtectionMode(protection);
+  }
+
+  /* ---------- configuración ---------- */
+
+  get pagePolicy() { return this.#pagePolicy; }
+  get tlbPolicy() { return this.#tlbPolicy; }
+  get protectionMode() { return this.#protection; }
+
+  get options() {
+    return {
+      pagePolicy: this.#pagePolicy.id,
+      tlbPolicy: this.#tlbPolicy.id,
+      protection: this.#protection.id,
+      seed: this.seed,
+    };
+  }
+
+  setPagePolicy(id) { this.#pagePolicy = getPolicy(id); }
+  setTlbPolicy(id) { this.#tlbPolicy = getPolicy(id); }
+
+  setProtectionMode(id) {
+    const mode = PROTECTION_MODES[id];
+    if (!mode) throw new RangeError(`Modo de protección desconocido: ${id}`);
+    this.#protection = mode;
+  }
+
+  /* ---------- instantáneas ---------- */
+
+  snapshot() {
+    return structuredClone({ state: this.state, rng: this.rng.state });
+  }
+
+  restore(snapshot) {
+    const copy = structuredClone(snapshot);
+    this.state = copy.state;
+    this.rng.state = copy.rng;
+  }
+
+  /** Copia independiente del sistema, opcionalmente con otras políticas. */
+  clone(overrides = {}) {
+    const copy = new VirtualMemorySystem(this.geometry, { ...this.options, ...overrides });
+    copy.restore(this.snapshot());
+    return copy;
+  }
+
+  /* ---------- consultas ---------- */
+
+  counts() {
+    let allocated = 0, inMemory = 0, inSwap = 0;
+    for (const pte of this.state.pageTable) {
+      if (!pte.allocated) continue;
+      allocated++;
+      if (pte.valid) inMemory++; else inSwap++;
+    }
+    return { allocated, inMemory, inSwap, free: this.geometry.pages - allocated };
+  }
+
+  /** Bytes actuales de una página virtual (desde su frame o su sector de swap). */
+  readPage(vpn) {
+    this.#assertVpn(vpn);
+    const pte = this.state.pageTable[vpn];
+    if (!pte.allocated) return null;
+    const { pageSize } = this.geometry;
+    if (pte.valid) return this.state.memory.slice(pte.ppn * pageSize, (pte.ppn + 1) * pageSize);
+    return this.state.swap[pte.ssn].data.slice();
+  }
+
+  /* ---------- asignación (Click to Allocate) ---------- */
+
+  allocate(vpn, permissions) {
+    this.#assertVpn(vpn);
+    const g = this.geometry;
+    const pte = this.state.pageTable[vpn];
+    if (pte.allocated) throw new Error(`La página ${this.#fmt.vpn(vpn)} ya está asignada.`);
+
+    const perms = permissions ?? this.#protection.make(this.rng);
+    const data = new Uint8Array(g.pageSize);
+    for (let i = 0; i < data.length; i++) data[i] = this.rng.int(256);
+    Object.assign(pte, { allocated: true, dirty: false, r: !!perms.r, w: !!perms.w, e: !!perms.e });
+
+    const ppn = this.#freeFrame();
+    if (ppn !== -1) {
+      this.#placeInFrame(vpn, ppn, data, this.#tick());
+      return { vpn, location: 'frame', ppn };
+    }
+    const ssn = this.#freeSector();
+    this.state.swap[ssn] = { vpn, data };
+    Object.assign(pte, { valid: false, ppn: null, ssn });
+    return { vpn, location: 'swap', ssn };
+  }
+
+  /** Asigna `count` páginas libres en orden aleatorio (Infinity = todas). */
+  allocateRandom(count = Infinity) {
+    const free = this.state.pageTable.filter((p) => !p.allocated).map((p) => p.vpn);
+    const order = this.rng.shuffle(free).slice(0, Math.min(count, free.length));
+    return order.map((vpn) => this.allocate(vpn));
+  }
+
+  setPermission(vpn, bit, value) {
+    this.#assertVpn(vpn);
+    if (!PERMISSION_BITS.includes(bit)) throw new RangeError(`Bit de permiso desconocido: ${bit}`);
+    const pte = this.state.pageTable[vpn];
+    if (!pte.allocated) throw new Error(`La página ${this.#fmt.vpn(vpn)} no está asignada.`);
+    pte[bit] = !!value;
+    const cached = this.#findTlbByVpn(vpn);
+    if (cached) this.state.tlb[cached.set][cached.way][bit] = !!value; // la TLB refleja la tabla
+  }
+
+  /* ---------- accesos ---------- */
+
+  /** Ejecuta un acceso completo y devuelve el resultado. */
+  execute(va, options) {
+    const it = this.access(va, options);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+
+  /** Generador del acceso: produce pasos explicados y retorna el resultado. */
+  *access(va, { type = 'read', value = 0 } = {}) {
+    this.#assertAddress(va);
+    if (type !== 'read' && type !== 'write') throw new TypeError(`Tipo de acceso desconocido: ${type}`);
+    if (type === 'write' && !(Number.isInteger(value) && value >= 0 && value <= 255)) {
+      throw new RangeError('El byte a escribir debe estar entre 0x00 y 0xFF.');
+    }
+
+    const g = this.geometry;
+    const s = this.state;
+    const fx = this.#fmt;
+    const now = this.#tick();
+    const f = decomposeAddress(g, va);
+    const result = {
+      type, va, ...f,
+      tlb: null, pt: null, ppn: null, ssnBefore: null, pa: null,
+      value: null, replaced: null, tlbEvicted: null, outcome: 'ok',
+    };
+    s.stats[type === 'read' ? 'reads' : 'writes']++;
+
+    yield step('info', 'Descomposición de la dirección virtual',
+      `VA ${va} = ${fx.va(va)} → VPN ${fx.vpn(f.vpn)} y offset ${fx.offset(f.offset)}. ` +
+      `La VPN se divide en tag ${fx.tag(f.tag)} e índice de conjunto ${fx.index(f.index)} para buscar en la TLB.`,
+      ['addr', `tlbset:${f.index}`]);
+
+    const pte = s.pageTable[f.vpn];
+    const way = this.#findTlbWay(f.index, f.tag);
+    let tlbEntry;
+
+    if (way !== -1) {
+      tlbEntry = s.tlb[f.index][way];
+      tlbEntry.lastUsed = now;
+      s.stats.tlbHits++;
+      result.tlb = 'hit';
+      result.ppn = tlbEntry.ppn;
+      yield step('ok', 'Acierto en la TLB',
+        `El conjunto ${fx.index(f.index)} tiene una entrada válida con tag ${fx.tag(f.tag)} (vía ${way}). ` +
+        `PPN = ${fx.ppn(tlbEntry.ppn)}; no hace falta consultar la tabla de páginas.`,
+        [`tlb:${f.index}:${way}`]);
+      if (!this.#allows(tlbEntry, type)) {
+        return yield* this.#protectionFault(result, [`tlb:${f.index}:${way}`, `pt:${f.vpn}`]);
+      }
+    } else {
+      s.stats.tlbMisses++;
+      result.tlb = 'miss';
+      yield step('warn', 'Fallo en la TLB',
+        `Ninguna vía del conjunto ${fx.index(f.index)} tiene el tag ${fx.tag(f.tag)} válido. ` +
+        `Se consulta la tabla de páginas en la entrada VPN ${fx.vpn(f.vpn)}.`,
+        [`tlbset:${f.index}`, `pt:${f.vpn}`]);
+
+      if (!pte.allocated) {
+        s.stats.segFaults++;
+        result.pt = 'unallocated';
+        result.outcome = 'segfault';
+        yield finalStep('bad', 'Fallo de segmento',
+          `La página ${fx.vpn(f.vpn)} no fue asignada al proceso: no tiene frame ni sector de swap. El acceso se aborta.`,
+          [`pt:${f.vpn}`, `vpage:${f.vpn}`]);
+        return result;
+      }
+
+      if (!this.#allows(pte, type)) {
+        result.ppn = pte.ppn;
+        result.ssnBefore = pte.ssn;
+        return yield* this.#protectionFault(result, [`pt:${f.vpn}`]);
+      }
+
+      if (pte.valid) {
+        s.stats.ptHits++;
+        result.pt = 'hit';
+        yield step('ok', 'Acierto en la tabla de páginas',
+          `V = 1: la página está en memoria principal, en el frame PPN ${fx.ppn(pte.ppn)}.`,
+          [`pt:${f.vpn}`, `frame:${pte.ppn}`]);
+      } else {
+        s.stats.pageFaults++;
+        result.pt = 'fault';
+        result.ssnBefore = pte.ssn;
+        yield step('warn', 'Fallo de página',
+          `V = 0: la página está en swap, sector SSN ${fx.ssn(pte.ssn)}. Hay que traerla a memoria principal.`,
+          [`pt:${f.vpn}`, `swap:${pte.ssn}`]);
+        yield* this.#bringIntoMemory(f.vpn, now, result);
+      }
+
+      result.ppn = pte.ppn;
+      const fill = this.#fillTlb(f, pte, now);
+      result.tlbEvicted = fill.evicted;
+      tlbEntry = s.tlb[f.index][fill.way];
+      const evictedText = fill.evicted === null
+        ? ' Había una vía libre.'
+        : ` La vía estaba ocupada por la VPN ${fx.vpn(fill.evicted)}; se reemplaza con ${this.#tlbPolicy.id}.`;
+      yield step('info', 'TLB actualizada',
+        `Se guarda la traducción VPN ${fx.vpn(f.vpn)} → PPN ${fx.ppn(pte.ppn)} en el conjunto ${fx.index(f.index)}, vía ${fill.way}, con tag ${fx.tag(f.tag)}.${evictedText}`,
+        [`tlb:${f.index}:${fill.way}`]);
+    }
+
+    const pa = physicalAddress(g, result.ppn, f.offset);
+    result.pa = pa;
+    s.frames[result.ppn].lastUsed = now;
+    const where = `PA = PPN ${fx.ppn(result.ppn)} | offset ${fx.offset(f.offset)} = ${fx.pa(pa)}.`;
+
+    if (type === 'read') {
+      result.value = s.memory[pa];
+      yield finalStep('ok', 'Lectura completada', `${where} Byte leído: ${fx.byte(result.value)}.`,
+        [`frame:${result.ppn}`, `byte:${pa}`, `pt:${f.vpn}`]);
+    } else {
+      s.memory[pa] = value;
+      pte.dirty = true;
+      tlbEntry.dirty = true;
+      result.value = value;
+      yield finalStep('ok', 'Escritura completada',
+        `${where} Se escribe ${fx.byte(value)} y el bit D (dirty) pasa a 1 en la tabla de páginas y en la TLB.`,
+        [`frame:${result.ppn}`, `byte:${pa}`, `pt:${f.vpn}`, `tlb:${f.index}:${s.tlb[f.index].indexOf(tlbEntry)}`]);
+    }
+    return result;
+  }
+
+  /* ---------- internos ---------- */
+
+  *#protectionFault(result, focus) {
+    this.state.stats.protectionFaults++;
+    result.outcome = 'protection';
+    const reason = result.type === 'write'
+      ? 'tiene W = 0 (protegida contra escritura)'
+      : 'tiene R = 0 (sin permiso de lectura)';
+    yield finalStep('bad', 'Violación de protección',
+      `La página ${this.#fmt.vpn(result.vpn)} ${reason}. La MMU genera una excepción y el acceso no se realiza.`,
+      focus);
+    return result;
+  }
+
+  *#bringIntoMemory(vpn, now, result) {
+    const g = this.geometry;
+    const s = this.state;
+    const fx = this.#fmt;
+    const pte = s.pageTable[vpn];
+    const sector = pte.ssn;
+    const incoming = s.swap[sector];
+    let ppn = this.#freeFrame();
+
+    if (ppn === -1) {
+      const candidates = s.frames.map((frame, id) => ({ id, vpn: frame.vpn, loadedAt: frame.loadedAt, lastUsed: frame.lastUsed }));
+      const victim = this.#pagePolicy.selectVictim(candidates, this.rng);
+      ppn = victim.id;
+      const victimPte = s.pageTable[victim.vpn];
+      const dirtyText = victimPte.dirty
+        ? 'Está sucia (D = 1), así que su contenido se escribe en swap.'
+        : 'Está limpia (D = 0).';
+      yield step('warn', `Reemplazo de página (${this.#pagePolicy.id})`,
+        `No hay frames libres. La política ${this.#pagePolicy.id} elige el frame ${fx.ppn(ppn)}, que contiene la página ${fx.vpn(victim.vpn)}. ${dirtyText}`,
+        [`frame:${ppn}`, `pt:${victim.vpn}`]);
+
+      const victimData = s.memory.slice(ppn * g.pageSize, (ppn + 1) * g.pageSize);
+      s.swap[sector] = { vpn: victim.vpn, data: victimData };
+      Object.assign(victimPte, { valid: false, dirty: false, ppn: null, ssn: sector });
+      s.frames[ppn] = null;
+      const invalidated = this.#invalidateTlb(victim.vpn);
+      s.stats.replacements++;
+      result.replaced = { vpn: victim.vpn, ppn, ssn: sector };
+
+      const focus = [`swap:${sector}`, `pt:${victim.vpn}`];
+      if (invalidated) focus.push(`tlb:${invalidated.set}:${invalidated.way}`);
+      yield step('info', 'Página víctima enviada a swap',
+        `La página ${fx.vpn(victim.vpn)} pasa al sector SSN ${fx.ssn(sector)} (V = 0).` +
+        (invalidated ? ' Su traducción en la TLB queda invalidada.' : ''),
+        focus);
+    } else {
+      s.swap[sector] = null;
+    }
+
+    this.#placeInFrame(vpn, ppn, incoming.data, now);
+    yield step('info', 'Página cargada en memoria principal',
+      `La página ${fx.vpn(vpn)} se copia desde SSN ${fx.ssn(sector)} al frame ${fx.ppn(ppn)}. La tabla de páginas queda con V = 1 y PPN = ${fx.ppn(ppn)}.`,
+      [`frame:${ppn}`, `pt:${vpn}`]);
+  }
+
+  #fillTlb(f, pte, now) {
+    const set = this.state.tlb[f.index];
+    let way = set.findIndex((e) => !e.valid);
+    let evicted = null;
+    if (way === -1) {
+      const candidates = set.map((e, id) => ({ id, loadedAt: e.loadedAt, lastUsed: e.lastUsed }));
+      way = this.#tlbPolicy.selectVictim(candidates, this.rng).id;
+      evicted = set[way].vpn;
+    }
+    set[way] = {
+      valid: true, dirty: pte.dirty, r: pte.r, w: pte.w, e: pte.e,
+      tag: f.tag, ppn: pte.ppn, vpn: f.vpn, loadedAt: now, lastUsed: now,
+    };
+    return { way, evicted };
+  }
+
+  #placeInFrame(vpn, ppn, data, time) {
+    this.state.memory.set(data, ppn * this.geometry.pageSize);
+    this.state.frames[ppn] = { vpn, loadedAt: time, lastUsed: time };
+    Object.assign(this.state.pageTable[vpn], { valid: true, ppn, ssn: null });
+  }
+
+  #findTlbWay(index, tag) {
+    return this.state.tlb[index].findIndex((e) => e.valid && e.tag === tag);
+  }
+
+  #findTlbByVpn(vpn) {
+    const set = vpn & mask(this.geometry.indexBits);
+    const way = this.state.tlb[set].findIndex((e) => e.valid && e.vpn === vpn);
+    return way === -1 ? null : { set, way };
+  }
+
+  #invalidateTlb(vpn) {
+    const loc = this.#findTlbByVpn(vpn);
+    if (loc) this.state.tlb[loc.set][loc.way] = emptyTlbEntry();
+    return loc;
+  }
+
+  #allows(entry, type) {
+    return type === 'read' ? entry.r : entry.w;
+  }
+
+  #freeFrame() { return this.state.frames.indexOf(null); }
+
+  #freeSector() {
+    const ssn = this.state.swap.indexOf(null);
+    if (ssn === -1) throw new Error('El espacio de swap está lleno.');
+    return ssn;
+  }
+
+  #tick() { return ++this.state.clock; }
+
+  #assertVpn(vpn) {
+    if (!Number.isInteger(vpn) || vpn < 0 || vpn >= this.geometry.pages) {
+      throw new RangeError(`VPN fuera de rango: ${vpn}`);
+    }
+  }
+
+  #assertAddress(va) {
+    const { vmSize } = this.geometry;
+    if (!Number.isInteger(va) || va < 0 || va >= vmSize) {
+      throw new RangeError(`La dirección debe estar entre 0 y ${vmSize - 1} (${this.#fmt.va(vmSize - 1)}).`);
+    }
+  }
+}
+
+return { PROTECTION_MODES, PERMISSION_BITS, VirtualMemorySystem };
+});
+
+__define("js/core/format.js", function (__require) {
+/**
+ * Formateadores hexadecimales con el ancho correcto para cada campo
+ * según la geometría actual. Compartido por el núcleo y la interfaz.
+ */
+const { toHex } = __require("js/core/bits.js");
+function createFormatter(g) {
+  return Object.freeze({
+    va: (v) => toHex(v, g.vaBits),
+    vpn: (v) => toHex(v, g.vpnBits),
+    offset: (v) => toHex(v, g.offsetBits),
+    tag: (v) => toHex(v, g.tagBits),
+    index: (v) => toHex(v, g.indexBits),
+    ppn: (v) => toHex(v, g.ppnBits),
+    ssn: (v) => toHex(v, g.vpnBits),
+    pa: (v) => toHex(v, g.paBits),
+    byte: (v) => toHex(v, 8),
+  });
+}
+
+return { createFormatter };
+});
+
+__define("js/core/policies.js", function (__require) {
+/**
+ * Políticas de reemplazo (patrón Strategy).
+ * Cada política recibe candidatos { id, loadedAt, lastUsed } y devuelve la víctima.
+ * Se usan tanto para frames de memoria principal como para las vías de la TLB.
+ * Agregar una política nueva solo requiere registrarla en POLICIES.
+ */
+
+function minBy(items, key) {
+  return items.reduce((best, item) => (key(item) < key(best) ? item : best));
+}
+
+const LRU = Object.freeze({
+  id: 'LRU',
+  label: 'LRU (menos reciente)',
+  selectVictim: (candidates) => minBy(candidates, (c) => c.lastUsed),
+});
+
+const FIFO = Object.freeze({
+  id: 'FIFO',
+  label: 'FIFO (primera en entrar)',
+  selectVictim: (candidates) => minBy(candidates, (c) => c.loadedAt),
+});
+
+const RANDOM = Object.freeze({
+  id: 'RANDOM',
+  label: 'Aleatoria (Random)',
+  selectVictim: (candidates, rng) => rng.pick(candidates),
+});
+
+const POLICIES = Object.freeze({ LRU, FIFO, RANDOM });
+
+function getPolicy(id) {
+  const policy = POLICIES[id];
+  if (!policy) throw new RangeError(`Política de reemplazo desconocida: ${id}`);
+  return policy;
+}
+
+return { POLICIES, getPolicy };
+});
+
+__define("js/core/rng.js", function (__require) {
+/**
+ * Generador pseudoaleatorio con semilla (mulberry32).
+ * Con la misma semilla se obtiene la misma secuencia, lo que permite repetir
+ * un experimento y comparar políticas sobre exactamente el mismo estado.
+ */
+class SeededRandom {
+  constructor(seed = 351) {
+    this.state = seed >>> 0;
+  }
+
+  next() {
+    this.state = (this.state + 0x6d2b79f5) >>> 0;
+    let t = this.state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  int(maxExclusive) {
+    return Math.floor(this.next() * maxExclusive);
+  }
+
+  pick(items) {
+    return items[this.int(items.length)];
+  }
+
+  /** Devuelve una copia barajada (Fisher–Yates). */
+  shuffle(items) {
+    const copy = [...items];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = this.int(i + 1);
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  }
+}
+
+return { SeededRandom };
+});
+
+__define("js/core/analysis.js", function (__require) {
+/**
+ * Análisis por lotes: ejecuta la misma secuencia de direcciones con varias
+ * políticas de reemplazo, partiendo de copias idénticas del estado actual.
+ * No modifica el sistema original.
+ */
+const { decomposeAddress } = __require("js/core/config.js");
+function locationOf(pte) {
+  if (!pte.allocated) return { kind: 'none' };
+  return pte.valid ? { kind: 'frame', ppn: pte.ppn } : { kind: 'swap', ssn: pte.ssn };
+}
+
+function comparePolicies(system, addresses, policyIds, type = 'read') {
+  const g = system.geometry;
+  const runs = policyIds.map((policy) => {
+    const sim = system.clone({ pagePolicy: policy });
+    const before = { ...sim.state.stats };
+    const rows = addresses.map((va) => {
+      const { vpn } = decomposeAddress(g, va);
+      const location = locationOf(sim.state.pageTable[vpn]);
+      const result = sim.execute(va, { type });
+      return { va, vpn, location, result, replaced: result.replaced ? 1 : 0 };
+    });
+    const after = sim.state.stats;
+    const delta = Object.fromEntries(Object.keys(after).map((k) => [k, after[k] - before[k]]));
+    return { policy, rows, totals: delta };
+  });
+  return { type, addresses: [...addresses], runs };
+}
+
+return { comparePolicies };
+});
+
+__define("js/ui/toast.js", function (__require) {
+/** Mensajes breves (avisos y errores) en la parte inferior de la pantalla. */
+class Toast {
+  #timer = null;
+
+  constructor(element) {
+    this.element = element;
+  }
+
+  show(text, tone = 'info') {
+    this.element.textContent = text;
+    this.element.dataset.tone = tone;
+    this.element.hidden = false;
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => { this.element.hidden = true; }, tone === 'bad' ? 6000 : 3800);
+  }
+}
+
+return { Toast };
+});
+
+__define("js/ui/config-panel.js", function (__require) {
+/**
+ * Panel "Parámetros del sistema": configuración de memoria, políticas,
+ * configuración rápida de la práctica y resumen calculado (5.1 y 5.2).
+ */
+const { h, panelHead, card, field } = __require("js/ui/dom.js");
+const { PARAMETER_OPTIONS } = __require("js/core/config.js");
+const { POLICIES } = __require("js/core/policies.js");
+const { PROTECTION_MODES } = __require("js/core/mmu.js");
+const { PRACTICE_CONFIG } = __require("js/app/practice.js");
+const PARAMS = [
+  { key: 'vaBits', label: 'Bus de direcciones virtuales (n)', unit: 'bits' },
+  { key: 'pageSize', label: 'Tamaño de página (P)', unit: 'bytes' },
+  { key: 'tlbSize', label: 'Tamaño de la TLB', unit: 'entradas' },
+  { key: 'tlbWays', label: 'Asociatividad de la TLB (E)', unit: 'vía(s)' },
+  { key: 'pmSize', label: 'Memoria principal (M)', unit: 'bytes' },
+];
+
+class ConfigPanel {
+  constructor(root, { session, guard }) {
+    this.root = root;
+    this.session = session;
+    this.guard = guard;
+    this.inputs = {};
+  }
+
+  mount() {
+    const s = this.session;
+
+    const params = PARAMS.map((p) => {
+      const select = h('select', { id: `cfg-${p.key}`, name: p.key },
+        PARAMETER_OPTIONS[p.key].map((v) => h('option', { value: v }, `${v} ${p.unit}`)));
+      this.inputs[p.key] = select;
+      return field(select, p.label);
+    });
+
+    const select = (id, registry, option) => h('select', {
+      id, onchange: this.guard((e) => s.setOption(option, e.target.value)),
+    }, Object.values(registry).map((item) => h('option', { value: item.id }, item.label)));
+
+    this.inputs.pagePolicy = select('cfg-page-policy', POLICIES, 'pagePolicy');
+    this.inputs.tlbPolicy = select('cfg-tlb-policy', POLICIES, 'tlbPolicy');
+    this.inputs.protection = select('cfg-protection', PROTECTION_MODES, 'protection');
+    this.inputs.seed = h('input', {
+      id: 'cfg-seed', type: 'number', min: 0, step: 1, inputmode: 'numeric', class: 'mono',
+      onchange: this.guard((e) => s.setOption('seed', Number(e.target.value))),
+    });
+
+    this.summary = h('div', { class: 'summary-grid' });
+    this.summaryBadge = h('span', { class: 'badge badge--ok' });
+
+    this.generate = h('button', { class: 'btn btn--primary btn--block btn--lg', type: 'submit', id: 'btn-generate' }, '⚡ Generar sistema');
+
+    const form = h('form', {
+      class: 'panel__body',
+      onsubmit: this.guard((e) => {
+        e.preventDefault();
+        s.build(this.#readConfig());
+      }),
+    },
+      card({ title: 'Configuración de memoria', className: 'card--soft', note: 'Parámetros de la memoria virtual, la memoria principal y la TLB.' },
+        h('div', { class: 'form-grid' }, params, field(this.inputs.seed, 'Semilla aleatoria'))),
+      card({ title: 'Políticas y protección', note: 'Se aplican de inmediato, sin regenerar el sistema.' },
+        h('div', { class: 'form-grid' },
+          field(this.inputs.pagePolicy, 'Reemplazo de páginas', 'Memoria principal'),
+          field(this.inputs.tlbPolicy, 'Reemplazo en la TLB', 'Dentro de cada conjunto'),
+          field(this.inputs.protection, 'Permisos al asignar', 'Bits R / W / E de cada página'))),
+      card({ title: 'Configuración rápida' },
+        h('button', {
+          class: 'btn btn--outline btn--block', type: 'button', id: 'btn-practice',
+          onclick: this.guard(() => s.build(PRACTICE_CONFIG)),
+        }, 'Práctica 5.2 – 5.6 (10 bits · 16 B · TLB 4×2 · 256 B)')),
+      card({ title: 'Resumen del sistema', className: 'card--summary', extra: this.summaryBadge }, this.summary),
+      this.generate);
+
+    this.root.replaceChildren(panelHead('Parámetros del sistema'), form);
+  }
+
+  render() {
+    const s = this.session;
+    const g = s.geometry;
+    for (const p of PARAMS) this.inputs[p.key].value = String(s.config[p.key]);
+    this.inputs.pagePolicy.value = s.options.pagePolicy;
+    this.inputs.tlbPolicy.value = s.options.tlbPolicy;
+    this.inputs.protection.value = s.options.protection;
+    if (document.activeElement !== this.inputs.seed) this.inputs.seed.value = String(s.options.seed);
+    for (const el of this.root.querySelectorAll('select, input, button')) el.disabled = s.busy;
+
+    this.summaryBadge.textContent = `${g.vaBits} bits · ${g.pageSize} B`;
+    const tiles = [
+      ['Memoria virtual', `${g.vmSize} B`, `2^${g.vaBits}`],
+      ['Páginas', g.pages, `${g.vmSize}/${g.pageSize}`],
+      ['Frames', g.frames, `${g.pmSize}/${g.pageSize}`],
+      ['Bits VPN', g.vpnBits, `${g.vaBits}−${g.offsetBits}`],
+      ['Bits offset', g.offsetBits, `log₂ ${g.pageSize}`],
+      ['Bits PPN', g.ppnBits, `log₂ ${g.frames}`],
+      ['Conjuntos TLB', g.tlbSets, `${g.tlbSize}/${g.tlbWays}`],
+      ['Bits índice', g.indexBits, `log₂ ${g.tlbSets}`],
+      ['Bits tag', g.tagBits, `${g.vpnBits}−${g.indexBits}`],
+    ];
+    this.summary.replaceChildren(...tiles.map(([label, value, formula]) => h('div', { class: 'summary-tile' },
+      h('span', { class: 'summary-tile__label' }, label),
+      h('span', { class: 'summary-tile__value' }, String(value)),
+      h('span', { class: 'summary-tile__formula' }, formula))));
+  }
+
+  #readConfig() {
+    return Object.fromEntries(PARAMS.map((p) => [p.key, Number(this.inputs[p.key].value)]));
+  }
+}
+
+return { ConfigPanel };
+});
+
+__define("js/ui/dom.js", function (__require) {
+/** Pequeñas utilidades de DOM compartidas por las vistas. */
+
+/**
+ * Crea un elemento: h('button', { class: 'btn', onclick: fn }, 'Texto').
+ * Props especiales: class, dataset, text, on<evento>. Valores true crean
+ * atributos booleanos; null/false se omiten.
+ */
+function h(tag, props = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [key, value] of Object.entries(props ?? {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'class') el.className = value;
+    else if (key === 'dataset') Object.assign(el.dataset, value);
+    else if (key === 'text') el.textContent = value;
+    else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
+    else if (value === true) el.setAttribute(key, '');
+    else el.setAttribute(key, String(value));
+  }
+  for (const child of children.flat(Infinity)) {
+    if (child === null || child === undefined || child === false) continue;
+    el.append(child instanceof Node ? child : String(child));
+  }
+  return el;
+}
+
+/** Une nombres de clase descartando los vacíos. */
+function cx(...names) {
+  return names.filter(Boolean).join(' ');
+}
+
+/** Encabezado estándar de panel: título, texto secundario y acciones a la derecha. */
+function panelHead(title, meta, ...actions) {
+  return h('header', { class: 'panel__head' },
+    h('h2', { class: 'panel__title' }, title),
+    meta ? (meta instanceof Node ? meta : h('p', { class: 'panel__meta' }, meta)) : null,
+    actions);
+}
+
+/** Tarjeta interna con encabezado (sección dentro de un panel). */
+function card({ title, note, extra, className = '' }, ...children) {
+  return h('section', { class: cx('card', className) },
+    h('header', { class: 'card__head' }, h('h3', { class: 'card__title' }, title), extra ?? null),
+    note ? h('p', { class: 'card__note' }, note) : null,
+    children);
+}
+
+/** Campo con etiqueta arriba. */
+function field(control, label, help) {
+  return h('label', { class: 'field', for: control.id },
+    h('span', { class: 'field__label' }, label),
+    control,
+    help ? h('span', { class: 'field__help' }, help) : null);
+}
+
+/** Interruptor estilo "switch" sobre un checkbox. */
+function toggle(input, title, subtitle) {
+  return h('label', { class: 'toggle', for: input.id },
+    input, h('span', { class: 'toggle__track', 'aria-hidden': 'true' }),
+    h('span', { class: 'toggle__text' }, title, subtitle ? h('small', {}, subtitle) : null));
+}
+
+/** Copia texto al portapapeles con respaldo para entornos sin Clipboard API. */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = h('textarea', { class: 'visually-hidden', readonly: true });
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    area.remove();
+    return ok;
+  }
+}
+
+/** Celda de bit 0/1 para tablas. */
+function bitCell(value) {
+  return h('td', { class: cx('bit', value ? 'bit--on' : 'bit--off') }, value ? '1' : '0');
+}
+
+/** Valor hexadecimal de un byte, sin prefijo. */
+function byteText(value) {
+  return value.toString(16).toUpperCase().padStart(2, '0');
+}
+
+return { h, cx, panelHead, card, field, toggle, copyText, bitCell, byteText };
+});
+
+__define("js/app/practice.js", function (__require) {
+/** Datos de la Práctica 3-2 (Sistemas Operacionales, UIS). */
+
+/** Configuración usada en las secciones 5.2 a 5.6. */
+const PRACTICE_CONFIG = Object.freeze({ vaBits: 10, pageSize: 16, tlbSize: 4, tlbWays: 2, pmSize: 256 });
+
+/** Direcciones virtuales (decimal) de las tablas de 5.3, 5.4 y 5.5. */
+const PRACTICE_ADDRESSES = Object.freeze([80, 124, 480, 165, 800, 226, 58, 96, 212, 56, 1000, 512, 5, 126, 712]);
+
+return { PRACTICE_CONFIG, PRACTICE_ADDRESSES };
+});
+
+__define("js/ui/access-panel.js", function (__require) {
+/**
+ * Panel "Acceso manual a memoria": lectura, escritura, asignación de páginas,
+ * descomposición de la dirección con el modo paso a paso, y secuencias.
+ */
+const { h, cx, panelHead, card, field, toggle } = __require("js/ui/dom.js");
+const { decomposeAddress } = __require("js/core/config.js");
+const { parseNumber, parseHexByte, parseNumberList, toBinary } = __require("js/core/bits.js");
+const { POLICIES } = __require("js/core/policies.js");
+const { PRACTICE_ADDRESSES } = __require("js/app/practice.js");
+class AccessPanel {
+  constructor(root, { session, guard }) {
+    this.root = root;
+    this.session = session;
+    this.guard = guard;
+    this.preview = '80';
+  }
+
+  mount() {
+    const body = h('div', { class: 'panel__body' },
+      this.#readCard(),
+      this.#writeCard(),
+      this.#allocationCard(),
+      this.#explainToggle(),
+      this.#decompositionCard(),
+      this.#sequenceCard());
+    this.root.replaceChildren(panelHead('Acceso manual a memoria'), body);
+  }
+
+  render() {
+    const s = this.session;
+    const busy = s.busy;
+    for (const el of this.root.querySelectorAll('[data-lock]')) el.disabled = busy;
+    this.explain.checked = s.explain;
+
+    const c = s.system.counts();
+    const g = s.geometry;
+    const item = (label, value, cls) => h('div', { class: cx('alloc-summary__item', cls) },
+      h('span', { class: 'alloc-summary__value' }, String(value)), h('span', {}, label));
+    this.allocSummary.replaceChildren(
+      item('asignadas', `${c.allocated}/${g.pages}`), item('en memoria', c.inMemory, 'is-mm'), item('en swap', c.inSwap, 'is-swap'));
+    this.allocAll.disabled = busy || c.free === 0;
+    this.allocN.disabled = busy || c.free === 0;
+    this.allocBadge.textContent = c.free === 0 ? 'Todas asignadas' : `${c.free} libres`;
+    this.allocBadge.className = cx('badge', c.free === 0 ? 'badge--ok' : 'badge--neutral');
+
+    this.stepper.hidden = !busy;
+    if (busy) this.stepperLabel.textContent = `Paso ${s.steps.length}: ${s.steps.at(-1)?.title ?? ''}. Revisa el panel de mensajes y continúa.`;
+    this.#renderDecomposition();
+  }
+
+  /* ---------- tarjetas ---------- */
+
+  #readCard() {
+    this.readAddr = this.#addressInput('acc-read-addr', '80');
+    const form = h('form', {
+      class: 'input-action',
+      onsubmit: this.guard((e) => { e.preventDefault(); this.#run('read', this.readAddr.value); }),
+    }, field(this.readAddr, 'Dirección virtual', 'Decimal (80) o hexadecimal (0x50)'),
+    h('button', { class: 'btn btn--success', type: 'submit', id: 'btn-read', 'data-lock': true }, '📖 Leer'));
+    return card({ title: 'Lectura de memoria' }, form);
+  }
+
+  #writeCard() {
+    this.writeAddr = this.#addressInput('acc-write-addr', '0x50');
+    this.byte = h('input', { id: 'acc-byte', type: 'text', class: 'mono', autocomplete: 'off', value: '0xFF', maxlength: 4, 'data-lock': true });
+    const form = h('form', {
+      class: 'input-action',
+      onsubmit: this.guard((e) => { e.preventDefault(); this.#run('write', this.writeAddr.value); }),
+    }, field(this.writeAddr, 'Dirección virtual'), field(this.byte, 'Valor del byte'),
+    h('button', { class: 'btn btn--warning', type: 'submit', id: 'btn-write', 'data-lock': true }, '✏️ Escribir'));
+    return card({ title: 'Escritura de memoria' }, form);
+  }
+
+  #allocationCard() {
+    const s = this.session;
+    this.allocSummary = h('div', { class: 'alloc-summary' });
+    this.allocBadge = h('span', { class: 'badge' });
+    this.allocCount = h('input', { id: 'alloc-count', type: 'number', min: 1, step: 1, value: 10, inputmode: 'numeric', class: 'mono', 'data-lock': true });
+    this.allocN = h('button', {
+      class: 'btn btn--outline', type: 'button', id: 'btn-alloc-n',
+      onclick: this.guard(() => {
+        const n = Number(this.allocCount.value);
+        if (!Number.isInteger(n) || n < 1) throw new RangeError('Indica un número de páginas mayor que cero.');
+        s.allocateRandom(n);
+      }),
+    }, 'Asignar N al azar');
+    this.allocAll = h('button', {
+      class: 'btn btn--primary', type: 'button', id: 'btn-alloc-all',
+      onclick: this.guard(() => s.allocateRandom(Infinity)),
+    }, 'Asignar todas');
+    return card({
+      title: 'Asignación de páginas (Click to Allocate)',
+      extra: this.allocBadge,
+      note: 'Pulsa una página libre en "Memoria virtual" o en la tabla de páginas, o asigna varias en orden aleatorio.',
+    }, this.allocSummary, h('div', { class: 'alloc-row' }, field(this.allocCount, 'N páginas'), this.allocN, this.allocAll));
+  }
+
+  #explainToggle() {
+    this.explain = h('input', { id: 'acc-explain', type: 'checkbox', onchange: (e) => this.session.setExplain(e.target.checked) });
+    return h('div', { class: 'card card--soft' },
+      toggle(this.explain, 'Explicar cada acceso paso a paso', 'Avanza con "Siguiente paso" y resalta cada estructura que se consulta'));
+  }
+
+  #decompositionCard() {
+    const s = this.session;
+    this.binary = h('div', { class: 'binary' });
+    this.fieldCards = h('div', { class: 'field-cards' });
+    this.decompBadge = h('span', { class: 'badge' });
+    this.stepperLabel = h('span', { class: 'stepper__label' });
+    this.stepper = h('div', { class: 'stepper', hidden: true },
+      this.stepperLabel,
+      h('button', { class: 'btn btn--primary', type: 'button', id: 'btn-next', onclick: this.guard(() => s.nextStep()) }, '▶ Siguiente paso'),
+      h('button', { class: 'btn', type: 'button', id: 'btn-finish', onclick: this.guard(() => s.completeAccess()) }, '⏭ Completar'));
+    return card({ title: 'Descomposición de dirección', extra: this.decompBadge }, this.binary, this.fieldCards, this.stepper);
+  }
+
+  #sequenceCard() {
+    const s = this.session;
+    this.sequence = h('textarea', { id: 'seq-addresses', rows: 3, spellcheck: 'false', 'data-lock': true });
+    this.sequence.value = PRACTICE_ADDRESSES.join(', ');
+    this.policyChecks = Object.values(POLICIES).map((p) => h('input', { type: 'checkbox', id: `cmp-${p.id}`, value: p.id, checked: true, 'data-lock': true }));
+    return card({ title: 'Secuencia de accesos', note: 'Lecturas en orden. Viene cargada con las direcciones de las tablas 5.3 a 5.5.' },
+      field(this.sequence, 'Direcciones separadas por comas o espacios'),
+      h('div', { class: 'policy-checks' },
+        h('span', { class: 'field__label' }, 'Comparar:'),
+        this.policyChecks.map((c) => h('label', { class: 'check', for: c.id }, c, c.value))),
+      h('div', { class: 'button-row' },
+        h('button', {
+          class: 'btn btn--primary', type: 'button', id: 'btn-seq-run', 'data-lock': true,
+          onclick: this.guard(() => s.runSequence(this.#sequence())),
+        }, '▶ Ejecutar secuencia'),
+        h('button', {
+          class: 'btn', type: 'button', id: 'btn-seq-compare', 'data-lock': true,
+          onclick: this.guard(() => {
+            s.compare(this.#sequence(), this.policyChecks.filter((c) => c.checked).map((c) => c.value));
+            document.getElementById('tools-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }),
+        }, 'Comparar políticas')),
+      h('p', { class: 'hint' }, '"Ejecutar" aplica las lecturas al sistema con la política activa. "Comparar" las prueba con cada política sobre copias del estado actual, sin modificarlo (tabla 5.4).'));
+  }
+
+  /* ---------- acciones ---------- */
+
+  #run(type, text) {
+    const va = parseNumber(text);
+    if (Number.isNaN(va)) throw new RangeError('Escribe la dirección en decimal (80) o en hexadecimal (0x50).');
+    let value = 0;
+    if (type === 'write') {
+      value = parseHexByte(this.byte.value);
+      if (Number.isNaN(value)) throw new RangeError('El byte debe ser hexadecimal entre 0x00 y 0xFF.');
+    }
+    this.preview = text;
+    this.session.startAccess(va, type, value);
+  }
+
+  #sequence() {
+    const parsed = parseNumberList(this.sequence.value);
+    const bad = parsed.find((p) => Number.isNaN(p.value));
+    if (bad) throw new RangeError(`"${bad.token}" no es una dirección válida.`);
+    if (parsed.length === 0) throw new RangeError('Escribe al menos una dirección.');
+    return parsed.map((p) => p.value);
+  }
+
+  #addressInput(id, value) {
+    return h('input', {
+      id, type: 'text', class: 'mono', autocomplete: 'off', spellcheck: 'false', value, 'data-lock': true,
+      oninput: (e) => { this.preview = e.target.value; this.#renderDecomposition(); },
+    });
+  }
+
+  /* ---------- descomposición ---------- */
+
+  #renderDecomposition() {
+    const s = this.session;
+    const g = s.geometry;
+    const fx = s.format;
+    const pending = s.pendingAccess;
+    let va = pending?.va ?? parseNumber(this.preview);
+    if (Number.isNaN(va)) va = s.lastResult?.va ?? null;
+    this.decompBadge.textContent = `Dirección: ${g.vaBits} bits`;
+
+    if (va === null || va < 0 || va >= g.vmSize) {
+      this.binary.replaceChildren(
+        h('span', { class: 'binary__caption' }, 'Dirección en binario'),
+        h('span', { class: 'binary__empty' }, 'Dirección no válida'),
+        h('span', { class: 'binary__caption' }, `Rango permitido: 0 – ${g.vmSize - 1} (${fx.va(0)} – ${fx.va(g.vmSize - 1)})`));
+      this.fieldCards.replaceChildren();
+      return;
+    }
+
+    const f = decomposeAddress(g, va);
+    const result = !pending && s.lastResult?.va === va ? s.lastResult : null;
+    const span = (n, cls, label) => (n > 0
+      ? h('span', { class: cx('bitlabel', cls), style: `grid-column: span ${n}`, title: label }, n < 3 ? label.split(' ').pop() : label)
+      : null);
+
+    const vaBits = toBinary(va, g.vaBits).split('').map((b, i) => {
+      const pos = g.vaBits - 1 - i;
+      const kind = pos < g.offsetBits ? 'off' : pos < g.offsetBits + g.indexBits ? 'idx' : 'tag';
+      return h('span', { class: cx('bitbox', `bitbox--${kind}`), title: `bit ${pos}` }, b);
+    });
+
+    const hasPa = result?.pa !== null && result?.pa !== undefined;
+    const paRow = hasPa
+      ? h('div', { class: 'bitrow', style: `--cols:${g.paBits}` },
+        toBinary(result.pa, g.paBits).split('').map((b, i) => h('span', {
+          class: cx('bitbox', g.paBits - 1 - i < g.offsetBits ? 'bitbox--off' : 'bitbox--ppn'),
+        }, b)),
+        span(g.ppnBits, 'bitlabel--ppn', `PPN ${fx.ppn(result.ppn)}`),
+        span(g.offsetBits, 'bitlabel--off', `Offset ${fx.offset(f.offset)}`))
+      : null;
+
+    this.binary.replaceChildren(...[
+      h('span', { class: 'binary__caption' }, `Dirección virtual ${va} = ${fx.va(va)}`),
+      h('div', { class: 'binary__bits' },
+        h('div', { class: 'bitrow', style: `--cols:${g.vaBits}` },
+          vaBits,
+          span(g.vpnBits, 'bitlabel--vpn', `VPN ${fx.vpn(f.vpn)}`),
+          span(g.offsetBits, 'bitlabel--off', `Offset ${fx.offset(f.offset)}`),
+          span(g.tagBits, 'bitlabel--tag', `Tag ${fx.tag(f.tag)}`),
+          span(g.indexBits, 'bitlabel--idx', `Índice ${fx.index(f.index)}`),
+          span(g.offsetBits, 'bitlabel--blank', ''))),
+      hasPa ? h('span', { class: 'binary__caption' }, `Dirección física ${result.pa} = ${fx.pa(result.pa)}`) : null,
+      hasPa ? h('div', { class: 'binary__bits' }, paRow) : null,
+    ].filter(Boolean));
+
+    const fieldCard = (kind, name, value, bits, pending = false) => h('div', { class: cx('field-card', `field-card--${kind}`, pending && 'is-pending') },
+      h('span', { class: 'field-card__name' }, name),
+      h('span', { class: 'field-card__value' }, value),
+      h('span', { class: 'field-card__bits' }, bits));
+    this.fieldCards.replaceChildren(
+      fieldCard('vpn', 'VPN', fx.vpn(f.vpn), `${g.vpnBits} bits`),
+      fieldCard('tag', 'Tag TLB', fx.tag(f.tag), `${g.tagBits} bits`),
+      fieldCard('idx', 'Índice TLB', fx.index(f.index), `${g.indexBits} bits`),
+      fieldCard('off', 'Offset', fx.offset(f.offset), `${g.offsetBits} bits`),
+      fieldCard('ppn', 'PPN', result?.ppn !== null && result?.ppn !== undefined ? fx.ppn(result.ppn) : 'Pendiente', `${g.ppnBits} bits`, !hasPa));
+  }
+}
+
+return { AccessPanel };
+});
+
+__define("js/ui/messages-panel.js", function (__require) {
+/**
+ * Panel "Mensajes de simulación": bitácora de lo que hace el sistema.
+ * Cada acceso agrupa sus pasos explicados; el más reciente queda arriba.
+ */
+const { h, cx, panelHead } = __require("js/ui/dom.js");
+const time = (date) => date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+class MessagesPanel {
+  constructor(root, { session, guard }) {
+    this.root = root;
+    this.session = session;
+    this.guard = guard;
+  }
+
+  mount() {
+    this.list = h('ol', { class: 'messages', 'aria-live': 'polite' });
+    this.root.replaceChildren(
+      panelHead('Mensajes de simulación', null,
+        h('button', { class: 'btn btn--light', type: 'button', id: 'btn-clear-messages', onclick: this.guard(() => this.session.clearMessages()) }, 'Limpiar')),
+      h('div', { class: 'panel__body' }, this.list));
+  }
+
+  render() {
+    const s = this.session;
+    if (s.messages.length === 0) {
+      this.list.replaceChildren(h('li', { class: 'empty' }, 'Sin mensajes. Haz un acceso para ver la explicación aquí.'));
+      return;
+    }
+    this.list.replaceChildren(...s.messages.map((m) => {
+      const live = s.busy && m.steps === s.steps;
+      return h('li', { class: cx('message', `message--${m.tone}`, live && 'is-live') },
+        h('div', { class: 'message__head' },
+          h('span', { class: 'message__title' }, m.title),
+          h('span', { class: 'message__time' }, time(m.at))),
+        m.detail ? h('p', { class: 'message__detail' }, m.detail) : null,
+        m.steps.length ? h('ol', { class: 'steps' }, m.steps.map((st, i) => h('li', {
+          class: cx('step', `step--${st.tone}`, live && i === m.steps.length - 1 && 'is-current'),
+        }, h('strong', {}, st.title), h('span', {}, st.detail)))) : null);
+    }));
+  }
+}
+
+return { MessagesPanel };
+});
+
+__define("js/ui/stats-panel.js", function (__require) {
+/** Panel "Estadísticas y rendimiento". */
+const { h, cx, panelHead } = __require("js/ui/dom.js");
+class StatsPanel {
+  constructor(root, { session }) {
+    this.root = root;
+    this.session = session;
+  }
+
+  mount() {
+    this.grid = h('div', { class: 'stats-grid' });
+    this.root.replaceChildren(panelHead('Estadísticas y rendimiento'), h('div', { class: 'panel__body' }, this.grid));
+  }
+
+  render() {
+    const st = this.session.system.state.stats;
+    const accesses = st.reads + st.writes;
+    const lookups = st.tlbHits + st.tlbMisses;
+    const ptLookups = st.ptHits + st.pageFaults;
+    const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '0%');
+    const tiles = [
+      ['Accesos', accesses, '', `${st.reads} lecturas · ${st.writes} escrituras`],
+      ['Aciertos TLB', st.tlbHits, 'ok'],
+      ['Fallos TLB', st.tlbMisses, 'bad'],
+      ['Tasa de acierto TLB', pct(st.tlbHits, lookups), 'ok'],
+      ['Aciertos tabla de páginas', st.ptHits, 'ok'],
+      ['Fallos de página', st.pageFaults, 'bad', ptLookups ? `${pct(st.pageFaults, ptLookups)} de las consultas` : ''],
+      ['Reemplazos', st.replacements, ''],
+      ['Fallos de segmento', st.segFaults, 'warn'],
+      ['Violaciones de protección', st.protectionFaults, 'warn'],
+    ];
+    this.grid.replaceChildren(...tiles.map(([label, value, tone, note]) => h('div', { class: cx('stat', tone && `stat--${tone}`) },
+      h('span', { class: 'stat__label' }, label),
+      h('span', { class: 'stat__value' }, String(value)),
+      note ? h('span', { class: 'stat__note' }, note) : null)));
+  }
+}
+
+return { StatsPanel };
+});
+
+__define("js/ui/tlb-view.js", function (__require) {
+/** Vista de la TLB asociativa por conjuntos: campos V, D, R, W, E, T y PPN. */
+const { h, cx, bitCell } = __require("js/ui/dom.js");
+class TlbView {
+  constructor(root, { session }) {
+    this.root = root;
+    this.session = session;
+  }
+
+  mount() {
+    this.meta = h('p', { class: 'panel__meta' });
+    this.body = h('tbody');
+    this.root.replaceChildren(
+      h('header', { class: 'panel__head' }, h('h2', { class: 'panel__title' }, 'TLB'), this.meta),
+      h('div', { class: 'panel__body' }, h('div', { class: 'table-wrap' },
+        h('table', { class: 'grid-table' },
+          h('thead', {}, h('tr', {},
+            ['Conj.', 'Vía', 'V', 'D', 'R', 'W', 'E', 'T (tag)', 'PPN', 'VPN'].map((c) => h('th', { scope: 'col' }, c)))),
+          this.body))));
+  }
+
+  render() {
+    const s = this.session;
+    const g = s.geometry;
+    const fx = s.format;
+    const focus = s.focus;
+    this.meta.textContent = `${g.tlbSize} entradas · ${g.tlbWays} vía(s) · ${g.tlbSets} conjunto(s) · tag de ${g.tagBits} bits`;
+
+    const rows = [];
+    s.system.state.tlb.forEach((set, si) => {
+      set.forEach((e, wi) => {
+        rows.push(h('tr', {
+          class: cx(
+            wi === 0 && 'set-start',
+            !e.valid && 'is-empty',
+            focus.has(`tlbset:${si}`) && 'is-soft',
+            focus.has(`tlb:${si}:${wi}`) && 'is-focus'),
+        },
+          wi === 0 ? h('th', { scope: 'row', rowspan: g.tlbWays, class: 'set-label' }, fx.index(si)) : null,
+          h('td', { class: 'muted' }, String(wi)),
+          bitCell(e.valid), bitCell(e.dirty), bitCell(e.r), bitCell(e.w), bitCell(e.e),
+          h('td', { class: 'mono field-tag' }, e.valid ? fx.tag(e.tag) : '–'),
+          h('td', { class: 'mono field-ppn' }, e.valid ? fx.ppn(e.ppn) : '–'),
+          h('td', { class: 'mono muted' }, e.valid ? fx.vpn(e.vpn) : '–')));
+      });
+    });
+    this.body.replaceChildren(...rows);
+  }
+}
+
+return { TlbView };
+});
+
+__define("js/ui/page-table-view.js", function (__require) {
+/**
+ * Tabla de páginas: VPN, V, D, R, W, E, PPN y SSN.
+ * Los bits R/W/E se pueden cambiar con un clic (mejora sobre CS351, donde
+ * los permisos se marcan al azar sin control del usuario).
+ */
+const { h, cx, bitCell } = __require("js/ui/dom.js");
+class PageTableView {
+  constructor(root, { session, guard }) {
+    this.root = root;
+    this.session = session;
+    this.guard = guard;
+    this.onlyAllocated = false;
+  }
+
+  mount() {
+    this.meta = h('p', { class: 'panel__meta' });
+    this.filter = h('input', {
+      type: 'checkbox', id: 'pt-filter',
+      onchange: (e) => { this.onlyAllocated = e.target.checked; this.render(); },
+    });
+    this.body = h('tbody');
+    this.root.replaceChildren(
+      h('header', { class: 'panel__head' },
+        h('h2', { class: 'panel__title' }, 'Tabla de páginas'), this.meta,
+        h('label', { class: 'check', for: this.filter.id }, this.filter, 'Solo asignadas')),
+      h('div', { class: 'panel__body' },
+        h('div', { class: 'table-wrap table-wrap--tall' },
+          h('table', { class: 'grid-table' },
+            h('thead', {}, h('tr', {},
+              ['VPN', 'V', 'D', 'R', 'W', 'E', 'PPN', 'SSN', ''].map((c) => h('th', { scope: 'col' }, c)))),
+            this.body)),
+        h('p', { class: 'hint' }, 'Pulsa R, W o E en una página asignada para cambiar su permiso.')),
+    );
+    this.root.addEventListener('click', this.guard((e) => this.#onClick(e)));
+  }
+
+  render() {
+    const s = this.session;
+    const g = s.geometry;
+    const fx = s.format;
+    const focus = s.focus;
+    const busy = s.busy;
+    const c = s.system.counts();
+    this.meta.textContent = `${g.pageTableEntries} entradas · ${c.allocated} asignadas`;
+
+    const rows = [];
+    for (const pte of s.system.state.pageTable) {
+      if (this.onlyAllocated && !pte.allocated) continue;
+      const v = pte.vpn;
+      const cls = cx(
+        !pte.allocated && 'is-empty',
+        s.selectedVpn === v && 'is-selected',
+        focus.has(`pt:${v}`) && 'is-focus');
+      if (!pte.allocated) {
+        rows.push(h('tr', { class: cls },
+          h('th', { scope: 'row', class: 'mono' }, h('button', { class: 'link', dataset: { select: v } }, fx.vpn(v))),
+          h('td', { colspan: 7, class: 'muted' }, 'sin asignar'),
+          h('td', {}, h('button', { class: 'btn btn--tiny', dataset: { allocate: v }, disabled: busy }, 'Asignar'))));
+        continue;
+      }
+      const perm = (bit) => h('td', {},
+        h('button', {
+          class: cx('bit-toggle', pte[bit] && 'is-on'),
+          dataset: { toggle: bit, vpn: v },
+          'aria-pressed': String(pte[bit]),
+          'aria-label': `${bit.toUpperCase()} de la página ${fx.vpn(v)}`,
+          disabled: busy,
+        }, pte[bit] ? '1' : '0'));
+      rows.push(h('tr', { class: cls },
+        h('th', { scope: 'row', class: 'mono' }, h('button', { class: 'link', dataset: { select: v } }, fx.vpn(v))),
+        bitCell(pte.valid), bitCell(pte.dirty), perm('r'), perm('w'), perm('e'),
+        h('td', { class: 'mono field-ppn' }, pte.valid ? fx.ppn(pte.ppn) : '–'),
+        h('td', { class: 'mono field-swap' }, pte.valid ? '–' : fx.ssn(pte.ssn)),
+        h('td', {})));
+    }
+    this.body.replaceChildren(...rows);
+    this.filter.checked = this.onlyAllocated;
+  }
+
+  #onClick(e) {
+    const btn = e.target.closest('button');
+    if (!btn || !this.root.contains(btn)) return;
+    const s = this.session;
+    if (btn.dataset.allocate) s.allocate(Number(btn.dataset.allocate));
+    else if (btn.dataset.toggle) s.togglePermission(Number(btn.dataset.vpn), btn.dataset.toggle);
+    else if (btn.dataset.select) s.selectPage(Number(btn.dataset.select));
+  }
+}
+
+return { PageTableView };
+});
+
+__define("js/ui/memory-views.js", function (__require) {
+/** Vistas de memoria principal, memoria virtual y swap. */
+const { h, cx, byteText } = __require("js/ui/dom.js");
+const { virtualAddressOf } = __require("js/core/config.js");
+function offsetHeader(pageSize) {
+  return Array.from({ length: pageSize }, (_, i) => h('th', { scope: 'col', class: 'byte-head' }, i.toString(16).toUpperCase()));
+}
+
+/* ---------------- Memoria principal ---------------- */
+
+class PhysicalMemoryView {
+  constructor(root, { session }) {
+    this.root = root;
+    this.session = session;
+  }
+
+  mount() {
+    this.meta = h('p', { class: 'panel__meta' });
+    this.table = h('table', { class: 'grid-table bytes-table' });
+    this.root.replaceChildren(
+      h('header', { class: 'panel__head' }, h('h2', { class: 'panel__title' }, 'Memoria principal (RAM)'), this.meta),
+      h('div', { class: 'panel__body' }, h('div', { class: 'table-wrap table-wrap--tall' }, this.table)));
+  }
+
+  render() {
+    const s = this.session;
+    const g = s.geometry;
+    const fx = s.format;
+    const st = s.system.state;
+    const focus = s.focus;
+    const used = st.frames.filter(Boolean).length;
+    this.meta.textContent = `${g.pmSize} B · ${g.frames} frames de ${g.pageSize} B · ${used} ocupados`;
+
+    const rows = st.frames.map((frame, ppn) => {
+      const base = ppn * g.pageSize;
+      const bytes = Array.from({ length: g.pageSize }, (_, i) => h('td', {
+        class: cx('byte', focus.has(`byte:${base + i}`) && 'is-focus'),
+        title: `PA ${fx.pa(base + i)}`,
+      }, frame ? byteText(st.memory[base + i]) : '··'));
+      return h('tr', { class: cx(!frame && 'is-empty', focus.has(`frame:${ppn}`) && 'is-soft') },
+        h('th', { scope: 'row', class: 'mono field-ppn' }, fx.ppn(ppn)),
+        h('td', { class: 'mono' }, frame ? fx.vpn(frame.vpn) : 'libre'),
+        bytes);
+    });
+    this.table.replaceChildren(
+      h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'PPN'), h('th', { scope: 'col' }, 'VPN'), offsetHeader(g.pageSize))),
+      h('tbody', {}, rows));
+  }
+}
+
+/* ---------------- Memoria virtual ---------------- */
+
+class VirtualMemoryView {
+  constructor(root, { session, guard }) {
+    this.root = root;
+    this.session = session;
+    this.guard = guard;
+  }
+
+  mount() {
+    this.meta = h('p', { class: 'panel__meta' });
+    this.map = h('div', { class: 'page-map', role: 'list' });
+    this.detail = h('div', { class: 'page-detail' });
+    this.root.replaceChildren(
+      h('header', { class: 'panel__head' }, h('h2', { class: 'panel__title' }, 'Memoria virtual'), this.meta),
+      h('div', { class: 'panel__body' },
+        h('div', { class: 'legend' },
+          h('span', { class: 'legend__item legend__item--free' }, 'Sin asignar (clic para asignar)'),
+          h('span', { class: 'legend__item legend__item--mm' }, 'En memoria principal'),
+          h('span', { class: 'legend__item legend__item--swap' }, 'En swap')),
+        h('div', { class: 'page-map-wrap' }, this.map),
+        this.detail));
+    this.map.addEventListener('click', this.guard((e) => {
+      const tile = e.target.closest('[data-vpn]');
+      if (!tile) return;
+      const vpn = Number(tile.dataset.vpn);
+      if (this.session.system.state.pageTable[vpn].allocated) this.session.selectPage(vpn);
+      else this.session.allocate(vpn);
+    }));
+  }
+
+  render() {
+    const s = this.session;
+    const g = s.geometry;
+    const fx = s.format;
+    const focus = s.focus;
+    this.meta.textContent = `${g.vmSize.toLocaleString('es-CO')} B · ${g.pages} páginas de ${g.pageSize} B`;
+
+    const tiles = s.system.state.pageTable.map((pte) => {
+      const v = pte.vpn;
+      const state = !pte.allocated ? 'free' : pte.valid ? 'mm' : 'swap';
+      const where = state === 'free' ? 'libre' : state === 'mm' ? `PPN ${fx.ppn(pte.ppn)}` : `SSN ${fx.ssn(pte.ssn)}`;
+      const start = virtualAddressOf(g, v);
+      return h('button', {
+        class: cx('tile', `tile--${state}`, s.selectedVpn === v && 'is-selected', (focus.has(`vpage:${v}`) || focus.has(`pt:${v}`)) && 'is-focus'),
+        dataset: { vpn: v },
+        role: 'listitem',
+        title: `VA ${fx.va(start)}–${fx.va(start + g.pageSize - 1)} · ${where}`,
+        disabled: s.busy && state === 'free',
+      }, h('span', { class: 'tile__vpn' }, fx.vpn(v)), h('span', { class: 'tile__where' }, where));
+    });
+    this.map.replaceChildren(...tiles);
+    this.#renderDetail();
+  }
+
+  #renderDetail() {
+    const s = this.session;
+    const g = s.geometry;
+    const fx = s.format;
+    const vpn = s.selectedVpn;
+    if (vpn === null || vpn >= g.pages) {
+      this.detail.replaceChildren(h('p', { class: 'hint' }, 'Selecciona una página asignada para ver su contenido.'));
+      return;
+    }
+    const pte = s.system.state.pageTable[vpn];
+    const start = virtualAddressOf(g, vpn);
+    const title = h('h3', { class: 'card__title' }, `Página ${fx.vpn(vpn)} · VA ${fx.va(start)} – ${fx.va(start + g.pageSize - 1)}`);
+    if (!pte.allocated) {
+      this.detail.replaceChildren(title, h('p', { class: 'hint' }, 'Página sin asignar: un acceso aquí produce fallo de segmento.'));
+      return;
+    }
+    const data = s.system.readPage(vpn);
+    const perms = ['r', 'w', 'e'].map((b) => `${b.toUpperCase()}=${pte[b] ? 1 : 0}`).join(' ');
+    const where = pte.valid ? `en el frame ${fx.ppn(pte.ppn)}` : `en swap, sector ${fx.ssn(pte.ssn)}`;
+    this.detail.replaceChildren(
+      title,
+      h('p', { class: 'muted' }, `Está ${where} · ${perms} · D=${pte.dirty ? 1 : 0}`),
+      h('div', { class: 'table-wrap' },
+        h('table', { class: 'grid-table bytes-table' },
+          h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'Offset'), offsetHeader(g.pageSize))),
+          h('tbody', {}, h('tr', {}, h('th', { scope: 'row' }, 'Byte'),
+            Array.from(data, (b) => h('td', { class: 'byte' }, byteText(b))))))));
+  }
+}
+
+/* ---------------- Swap ---------------- */
+
+class SwapView {
+  constructor(root, { session }) {
+    this.root = root;
+    this.session = session;
+  }
+
+  mount() {
+    this.meta = h('p', { class: 'panel__meta' });
+    this.content = h('div', { class: 'table-wrap table-wrap--tall' });
+    this.root.replaceChildren(
+      h('header', { class: 'panel__head' }, h('h2', { class: 'panel__title' }, 'Swap (disco)'), this.meta),
+      h('div', { class: 'panel__body' }, this.content));
+  }
+
+  render() {
+    const s = this.session;
+    const g = s.geometry;
+    const fx = s.format;
+    const focus = s.focus;
+    const sectors = s.system.state.swap
+      .map((entry, ssn) => ({ entry, ssn }))
+      .filter(({ entry, ssn }) => entry || focus.has(`swap:${ssn}`));
+    this.meta.textContent = `${sectors.filter((x) => x.entry).length} sectores ocupados de ${g.swapSectors}`;
+
+    if (sectors.length === 0) {
+      this.content.replaceChildren(h('p', { class: 'empty' },
+        'Sin páginas en swap. Se usa cuando asignas más páginas que frames disponibles.'));
+      return;
+    }
+    const rows = sectors.map(({ entry, ssn }) => h('tr', { class: cx(!entry && 'is-empty', focus.has(`swap:${ssn}`) && 'is-focus') },
+      h('th', { scope: 'row', class: 'mono field-swap' }, fx.ssn(ssn)),
+      h('td', { class: 'mono' }, entry ? fx.vpn(entry.vpn) : 'libre'),
+      entry ? Array.from(entry.data, (b) => h('td', { class: 'byte' }, byteText(b)))
+        : h('td', { colspan: g.pageSize, class: 'muted' }, 'sector liberado')));
+    this.content.replaceChildren(h('table', { class: 'grid-table bytes-table' },
+      h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'SSN'), h('th', { scope: 'col' }, 'VPN'), offsetHeader(g.pageSize))),
+      h('tbody', {}, rows)));
+  }
+}
+
+return { PhysicalMemoryView, VirtualMemoryView, SwapView };
+});
+
+__define("js/ui/tools-panel.js", function (__require) {
+/**
+ * Pestañas inferiores: historial de accesos (tablas de 5.3, 5.5 y 5.6)
+ * y comparación de políticas de reemplazo (tabla de 5.4).
+ */
+const { h, cx, copyText } = __require("js/ui/dom.js");
+const PT_LABELS = { hit: 'Acierto', fault: 'Fallo de página', unallocated: 'No asignada' };
+const OUTCOME_LABELS = { segfault: 'Fallo de segmento', protection: 'Violación de protección' };
+
+/* ---------- formato de filas (compartido por tabla y copia TSV) ---------- */
+
+function locationText(fx, e) {
+  if (e.outcome === 'segfault') return '—';
+  if (e.ppn === null) return e.ssnBefore !== null ? `SSN ${fx.ssn(e.ssnBefore)}` : '—';
+  if (e.ssnBefore !== null) return `SSN ${fx.ssn(e.ssnBefore)} → PPN ${fx.ppn(e.ppn)}`;
+  return `PPN ${fx.ppn(e.ppn)}`;
+}
+
+function outcomeText(fx, e) {
+  if (e.outcome !== 'ok') return OUTCOME_LABELS[e.outcome];
+  return e.type === 'read' ? `Leído ${fx.byte(e.value)}` : `Escrito ${fx.byte(e.value)}`;
+}
+
+function historyColumns(fx) {
+  return [
+    ['#', (e) => e.n],
+    ['Op.', (e) => (e.type === 'read' ? 'Lectura' : 'Escritura')],
+    ['VA (dec)', (e) => e.va],
+    ['VA (hex)', (e) => fx.va(e.va)],
+    ['VPN', (e) => fx.vpn(e.vpn)],
+    ['Offset', (e) => fx.offset(e.offset)],
+    ['TLB tag', (e) => fx.tag(e.tag)],
+    ['TLB índice', (e) => fx.index(e.index)],
+    ['TLB', (e) => (e.tlb === 'hit' ? 'Acierto' : 'Fallo')],
+    ['Tabla', (e) => PT_LABELS[e.pt] ?? '—'],
+    ['PPN/SSN', (e) => locationText(fx, e)],
+    ['Reemplazo', (e) => (e.replaced ? `VPN ${fx.vpn(e.replaced.vpn)} → SSN ${fx.ssn(e.replaced.ssn)}` : '—')],
+    ['Seg. fault', (e) => (e.outcome === 'segfault' ? 'SÍ' : 'NO')],
+    ['Resultado', (e) => outcomeText(fx, e)],
+  ];
+}
+
+function toTsv(header, rows) {
+  return [header, ...rows].map((r) => r.join('\t')).join('\n');
+}
+
+/* ---------- Historial ---------- */
+
+class HistoryTab {
+  constructor({ session, guard, toast }) {
+    this.session = session;
+    this.guard = guard;
+    this.toast = toast;
+    this.element = h('div', { class: 'tab-panel panel__body' });
+  }
+
+  mount() {
+    this.table = h('div', { class: 'table-wrap table-wrap--tall' });
+    this.element.replaceChildren(
+      h('div', { class: 'toolbar' },
+        h('p', { class: 'muted' }, 'Cada acceso queda registrado con las columnas de las tablas de la práctica.'),
+        h('div', { class: 'button-row' },
+          h('button', { class: 'btn btn--light', type: 'button', onclick: () => this.#copy() }, '📥 Copiar tabla'),
+          h('button', { class: 'btn btn--light', type: 'button', onclick: this.guard(() => this.session.clearHistory()) }, 'Limpiar'))),
+      this.table);
+  }
+
+  render() {
+    const s = this.session;
+    if (s.history.length === 0) {
+      this.table.replaceChildren(h('p', { class: 'empty' }, 'No hay operaciones registradas.'));
+      return;
+    }
+    const cols = historyColumns(s.format);
+    const rows = [...s.history].reverse().map((e) => h('tr', { class: cx(e.outcome !== 'ok' && 'is-fault') },
+      cols.map(([, get], i) => h(i === 0 ? 'th' : 'td', { class: i > 1 ? 'mono' : '' }, String(get(e))))));
+    this.table.replaceChildren(h('table', { class: 'grid-table history-table' },
+      h('thead', {}, h('tr', {}, cols.map(([name]) => h('th', { scope: 'col' }, name)))),
+      h('tbody', {}, rows)));
+  }
+
+  async #copy() {
+    const s = this.session;
+    const cols = historyColumns(s.format);
+    const tsv = toTsv(cols.map(([n]) => n), s.history.map((e) => cols.map(([, get]) => get(e))));
+    const ok = await copyText(tsv);
+    this.toast.show(ok ? 'Tabla copiada. Pégala en Excel, Sheets o Word.' : 'No se pudo copiar automáticamente.', ok ? 'ok' : 'bad');
+  }
+}
+
+/* ---------- Comparación de políticas ---------- */
+
+class CompareTab {
+  constructor({ session, toast }) {
+    this.session = session;
+    this.toast = toast;
+    this.element = h('div', { class: 'tab-panel panel__body' });
+  }
+
+  mount() {}
+
+  render() {
+    const cmp = this.session.comparison;
+    if (!cmp) {
+      this.element.replaceChildren(h('p', { class: 'empty' },
+        'Sin comparación todavía. En "Secuencia de accesos" pulsa "Comparar políticas". Para la tabla 5.4 asigna antes todas las páginas.'));
+      return;
+    }
+    const fx = this.session.format;
+    const { data } = cmp;
+    const best = Math.min(...data.runs.map((r) => r.totals.replacements));
+
+    const table = h('table', { class: 'grid-table compare-table' },
+      h('thead', {},
+        h('tr', {},
+          h('th', { scope: 'col', rowspan: 2 }, 'Dirección virtual (dec)'),
+          h('th', { scope: 'col', rowspan: 2 }, 'VPN'),
+          data.runs.map((r) => h('th', { scope: 'colgroup', colspan: 2, class: 'group-head' }, r.policy))),
+        h('tr', {}, data.runs.map(() => [h('th', { scope: 'col' }, 'PPN/SSN'), h('th', { scope: 'col' }, '# Reempl.')]))),
+      h('tbody', {}, data.addresses.map((va, i) => h('tr', {},
+        h('th', { scope: 'row', class: 'mono' }, String(va)),
+        h('td', { class: 'mono' }, fx.vpn(data.runs[0].rows[i].vpn)),
+        data.runs.map((r) => {
+          const row = r.rows[i];
+          return [
+            h('td', { class: cx('mono', row.result.outcome === 'segfault' && 'is-bad') }, this.#cellText(row)),
+            h('td', { class: cx('mono num', row.replaced && 'is-warn') }, String(row.replaced)),
+          ];
+        })))),
+      h('tfoot', {}, h('tr', {},
+        h('th', { scope: 'row', colspan: 2 }, 'TOTAL'),
+        data.runs.map((r) => [
+          h('td', {}, `${r.totals.pageFaults} fallos de página · ${r.totals.tlbHits} aciertos TLB`),
+          h('td', { class: cx('mono num total', r.totals.replacements === best && 'is-best') }, String(r.totals.replacements)),
+        ]))));
+
+    this.element.replaceChildren(
+      h('div', { class: 'toolbar' },
+        h('p', { class: 'muted' }, `${data.addresses.length} lecturas desde el mismo estado inicial · en verde, la política con menos reemplazos`),
+        h('button', { class: 'btn btn--light', type: 'button', onclick: () => this.#copy() }, 'Copiar tabla')),
+      h('div', { class: 'table-wrap' }, table));
+  }
+
+  #cellText(row) {
+    const fx = this.session.format;
+    const r = row.result;
+    if (r.outcome === 'segfault') return 'No asignada';
+    const before = row.location.kind === 'swap' ? `SSN ${fx.ssn(row.location.ssn)} → ` : '';
+    return `${before}PPN ${fx.ppn(r.ppn)}`;
+  }
+
+  async #copy() {
+    const fx = this.session.format;
+    const { data } = this.session.comparison;
+    const header = ['VA (dec)', 'VPN', ...data.runs.flatMap((r) => [`PPN/SSN ${r.policy}`, `# Reempl. ${r.policy}`])];
+    const rows = data.addresses.map((va, i) => [va, fx.vpn(data.runs[0].rows[i].vpn),
+      ...data.runs.flatMap((r) => [this.#cellText(r.rows[i]), r.rows[i].replaced])]);
+    rows.push(['TOTAL', '', ...data.runs.flatMap((r) => ['', r.totals.replacements])]);
+    const ok = await copyText(toTsv(header, rows));
+    this.toast.show(ok ? 'Tabla copiada. Pégala en Excel, Sheets o Word.' : 'No se pudo copiar automáticamente.', ok ? 'ok' : 'bad');
+  }
+}
+
+/* ---------- Contenedor con pestañas ---------- */
+
+class ToolsPanel {
+  constructor(root, ctx) {
+    this.root = root;
+    this.session = ctx.session;
+    this.tabs = [
+      { id: 'history', label: 'Historial de operaciones', view: new HistoryTab(ctx), count: () => this.session.history.length },
+      { id: 'compare', label: 'Comparación de políticas de reemplazo', view: new CompareTab(ctx), count: () => this.session.comparison?.data.runs.length ?? 0 },
+    ];
+    this.active = 'history';
+    this.lastComparison = null;
+  }
+
+  mount() {
+    this.badges = this.tabs.map(() => h('span', { class: 'badge badge--neutral' }));
+    this.buttons = this.tabs.map((t, i) => h('button', {
+      class: 'tab', type: 'button', role: 'tab', id: `tab-${t.id}`, 'aria-controls': `tabpanel-${t.id}`,
+      onclick: () => { this.active = t.id; this.render(); },
+    }, t.label, this.badges[i]));
+    this.tabs.forEach((t) => {
+      t.view.mount();
+      t.view.element.id = `tabpanel-${t.id}`;
+      t.view.element.setAttribute('role', 'tabpanel');
+      t.view.element.setAttribute('aria-labelledby', `tab-${t.id}`);
+    });
+    this.root.replaceChildren(
+      h('div', { class: 'tabs', role: 'tablist' }, this.buttons),
+      ...this.tabs.map((t) => t.view.element));
+  }
+
+  render() {
+    const cmp = this.session.comparison;
+    if (cmp && cmp.id !== this.lastComparison) this.active = 'compare';
+    this.lastComparison = cmp?.id ?? null;
+    this.tabs.forEach((t, i) => {
+      const on = t.id === this.active;
+      this.buttons[i].setAttribute('aria-selected', String(on));
+      this.badges[i].textContent = String(t.count());
+      t.view.element.hidden = !on;
+      t.view.render();
+    });
+  }
+}
+
+return { ToolsPanel };
+});
+
+__define("js/ui/help-dialog.js", function (__require) {
+/** Diálogo de ayuda: qué hace cada parte y cómo resolver cada sección de la guía. */
+const { h, panelHead } = __require("js/ui/dom.js");
+const GUIDE = [
+  ['5.1 Configuración', 'Cambia los parámetros y pulsa "Generar sistema". El "Resumen del sistema" muestra la capacidad de la memoria virtual, el número de páginas y frames, y los bits de cada campo.'],
+  ['5.2 Lectura y escritura', 'Usa "Práctica 5.2 – 5.6". En "Memoria virtual" pulsa la página 0x00 para asignarla y observa su PPN en la tabla de páginas.'],
+  ['5.3 Mapeo completo', 'Pulsa "Asignar todas" y luego "Ejecutar secuencia". El historial tiene la tabla completa.'],
+  ['5.4 Políticas de reemplazo', 'Con todas las páginas asignadas, pulsa "Comparar políticas". La tabla muestra los reemplazos de LRU, FIFO y aleatoria.'],
+  ['5.5 Mapeo incompleto', 'Pulsa "Reiniciar", asigna 10 páginas al azar y ejecuta la secuencia. La columna "Seg. fault" indica SÍ/NO.'],
+  ['5.6 Protección', 'Asigna todas las páginas y busca en la tabla de páginas las que tienen W = 0. Para escribir en la página VPN usa la dirección VPN × tamaño de página (VPN 0x07 → 0x70 con páginas de 16 B).'],
+];
+
+class HelpDialog {
+  constructor(dialog, opener) {
+    this.dialog = dialog;
+    this.opener = opener;
+  }
+
+  mount() {
+    const close = h('button', { class: 'btn btn--light', type: 'button', onclick: () => this.dialog.close() }, 'Cerrar');
+    this.dialog.replaceChildren(
+      panelHead('Cómo usar el simulador', null, close),
+      h('div', { class: 'help__body' },
+        h('h3', {}, 'Flujo de un acceso'),
+        h('ol', {},
+          h('li', {}, 'La dirección virtual se divide en VPN y offset; la VPN, en tag e índice de la TLB.'),
+          h('li', {}, 'Se busca el tag en el conjunto indicado por el índice. Si está, es un acierto en la TLB.'),
+          h('li', {}, 'Si no, se consulta la tabla de páginas: página sin asignar → fallo de segmento; permiso insuficiente → violación de protección; V = 0 → fallo de página.'),
+          h('li', {}, 'En un fallo de página la página se trae desde swap. Si no hay frames libres, la política elige una víctima que pasa a swap.'),
+          h('li', {}, 'La traducción se guarda en la TLB y se lee o escribe el byte en la dirección física PPN | offset.')),
+        h('h3', {}, 'Guía de la práctica'),
+        h('ul', {}, GUIDE.map(([title, text]) => h('li', {}, h('strong', {}, `${title}: `), text))),
+        h('h3', {}, 'Colores de los campos'),
+        h('p', { class: 'hint' }, 'VPN en ámbar, tag en morado, índice en azul, offset en verde y PPN en cian, igual en la descomposición y en las tablas. El amarillo marca lo que se consulta en el paso actual.')));
+    this.opener.addEventListener('click', () => this.dialog.showModal());
+    this.dialog.addEventListener('click', (e) => { if (e.target === this.dialog) this.dialog.close(); });
+  }
+
+  render() {}
+}
+
+return { HelpDialog };
+});
+__require("js/main.js");
+})();
+</script>
+</body>
+</html>

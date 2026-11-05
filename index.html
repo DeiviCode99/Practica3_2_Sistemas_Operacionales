@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Simulador de Memoria Virtual 351</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
+  <meta name="description" content="Simulador de memoria virtual con TLB, tabla de páginas, swap y políticas de reemplazo LRU, FIFO y aleatoria.">
+  <!-- build:css -->
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/views.css">
+  <!-- endbuild -->
+</head>
+<body>
+  <header class="header">
+    <div class="header__inner">
+      <div class="header__titles">
+        <h1>Simulador de Memoria Virtual 351</h1>
+        <p>Sistemas Operacionales | Universidad Industrial de Santander · Práctica 3-2</p>
+      </div>
+      <div class="header__actions">
+        <button class="btn btn--header" type="button" id="btn-help">? Ayuda</button>
+        <button class="btn btn--danger" type="button" id="btn-header-reset">↻ Reiniciar</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- Fila 1: configurar · operar · leer lo que pasó -->
+    <div class="row row--top">
+      <section class="panel" id="config-panel" aria-label="Parámetros del sistema"></section>
+      <section class="panel" id="access-panel" aria-label="Acceso manual a memoria"></section>
+      <section class="panel panel--messages" id="messages-panel" aria-label="Mensajes de simulación"></section>
+    </div>
+
+    <!-- Fila 2: estructuras de traducción -->
+    <div class="row row--three">
+      <section class="panel" id="tlb-view"></section>
+      <section class="panel" id="pt-view"></section>
+      <section class="panel" id="vm-view"></section>
+    </div>
+
+    <!-- Fila 3: almacenamiento -->
+    <div class="row row--storage">
+      <section class="panel" id="pm-view"></section>
+      <section class="panel" id="swap-view"></section>
+    </div>
+
+    <!-- Fila 4: resultados -->
+    <section class="panel" id="stats-panel" aria-label="Estadísticas y rendimiento"></section>
+    <section class="panel" id="tools-panel" aria-label="Historial y comparación"></section>
+  </main>
+
+  <footer class="footer">Simulador de Memoria Virtual 351 | Sistemas Operacionales | Universidad Industrial de Santander</footer>
+
+  <dialog class="help" id="help-dialog" aria-labelledby="help-title"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- build:js -->
+  <script type="module" src="js/main.js"></script>
+  <!-- endbuild -->
+</body>
+</html>

@@ -1,0 +1,81 @@
+/* ==========================================================
+   Variables de diseño — tema claro (mismo lenguaje visual que
+   el Simulador de Memoria Caché 351 del grupo).
+   Layout: encabezado degradado + filas de paneles blancos:
+   configurar | operar | mensajes, luego estructuras y resultados.
+========================================================== */
+:root {
+  color-scheme: light;
+
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #dbeafe;
+
+  --secondary: #64748b;
+  --secondary-dark: #475569;
+
+  --success: #16a34a;
+  --success-dark: #15803d;
+  --success-light: #dcfce7;
+
+  --danger: #dc2626;
+  --danger-dark: #b91c1c;
+  --danger-light: #fee2e2;
+
+  --warning: #f59e0b;
+  --warning-dark: #b45309;
+  --warning-light: #fef3c7;
+
+  --info: #0891b2;
+  --info-dark: #0e7490;
+  --info-light: #cffafe;
+
+  --purple: #7c3aed;
+  --purple-light: #ede9fe;
+
+  --background: #f1f5f9;
+  --surface: #ffffff;
+  --surface-secondary: #f8fafc;
+  --ink-strong: #0f172a;
+  --table-head: #1e293b;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --on-dark: #ffffff;
+  --on-dark-muted: #cbd5e1;
+
+  --border: #e2e8f0;
+  --border-dark: #cbd5e1;
+
+  /* Campos de la dirección: el mismo color en toda la interfaz */
+  --f-vpn: var(--warning-dark);
+  --f-vpn-bg: var(--warning-light);
+  --f-tag: var(--purple);
+  --f-tag-bg: var(--purple-light);
+  --f-idx: var(--primary-dark);
+  --f-idx-bg: var(--primary-light);
+  --f-off: var(--success-dark);
+  --f-off-bg: var(--success-light);
+  --f-ppn: var(--info-dark);
+  --f-ppn-bg: var(--info-light);
+  --f-swap: #a16207;
+  --f-swap-bg: #fef9c3;
+
+  /* Resaltado del paso actual */
+  --hl: #fef08a;
+  --hl-ring: #eab308;
+
+  --shadow-sm: 0 2px 6px rgb(15 23 42 / 0.05);
+  --shadow-md: 0 6px 18px rgb(15 23 42 / 0.09);
+  --shadow-lg: 0 12px 35px rgb(15 23 42 / 0.16);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 15px;
+
+  --font-body: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", "SFMono-Regular", Menlo, "Liberation Mono", monospace;
+
+  --gap: 16px;
+}
